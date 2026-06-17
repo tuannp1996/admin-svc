@@ -1,0 +1,22 @@
+version: "3.9"
+
+services:
+  admin-svc:
+    build: .
+    container_name: admin-svc
+    restart: unless-stopped
+    volumes:
+      # Mount Docker socket to inspect other containers
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Mount config (so you can edit without rebuilding)
+      - ./config.yaml:/app/config.yaml:ro
+    environment:
+      # Override config values via env vars (config.yaml uses ${VAR} syntax)
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    network_mode: host   # Allows checking localhost services; change if not needed

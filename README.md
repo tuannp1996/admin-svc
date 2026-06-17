@@ -1,49 +1,83 @@
 # admin-svc
 
-A small Python service for admin tasks.
+Lightweight Go service that monitors your server and sends Telegram alerts.
 
-## What this repository contains
+## What it monitors
 
-- `main.py` — service entrypoint
-- `requirements.txt` — Python dependencies
-- `env.example` — example environment variables
+| Check type | What it does |
+|---|---|
+| 🐳 **Docker** | Checks if named containers are running |
+| 🏥 **HTTP Health** | GET request → validates status code |
+| 🔁 **API/Curl** | Any method, custom headers & body → validates status |
+| 🌐 **Page** | GET page → validates status + optional text presence |
 
-## Prerequisites
+Alerts are **deduplicated**: you get one alert when something breaks, and one recovery message when it comes back. No spam.
 
-- Python 3.10+ (or system default from `python3`)
-- pip
+## Quick start
 
-## Setup
+### 1. Configure
 
-1. Create and activate a virtual environment (recommended):
+Edit `config.yaml`:
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
+```yaml
+telegram:
+  bot_token: "${TELEGRAM_BOT_TOKEN}"   # or paste directly
+  chat_id: "${TELEGRAM_CHAT_ID}"
+
+scheduler:
+  interval_seconds: 60
+
+docker:
+  enabled: true
+  containers:
+    - name: "nginx"
+      alert_on_stopped: true
+
+health_checks:
+  enabled: true
+  endpoints:
+    - name: "My API"
+      url: "http://localhost:8080/health"
+      expected_status: 200
 ```
 
-2. Install dependencies:
+### 2. Run with Docker Compose
 
 ```bash
-pip install -r requirements.txt
+export TELEGRAM_BOT_TOKEN=xxx
+export TELEGRAM_CHAT_ID=yyy
+docker compose up -d
 ```
 
-3. Create a `.env` from `env.example` and fill values as needed:
+### 3. Run as binary
 
 ```bash
-cp env.example .env
-# edit .env
+go build -o admin-svc ./cmd/main.go
+./admin-svc -config config.yaml
 ```
 
-## Run
+## Environment variable support
 
-Run the service with:
+All values in `config.yaml` support `${ENV_VAR}` substitution, so you can keep secrets out of the file.
 
-```bash
-python main.py
+## How to get a Telegram bot
+
+1. Message [@BotFather](https://t.me/BotFather) → `/newbot`
+2. Copy the bot token
+3. Add bot to your group or get your chat ID via `https://api.telegram.org/bot<TOKEN>/getUpdates`
+
+## Project structure
+
 ```
-
-## Notes
-
-- If the project grows, consider adding tests and CI config.
-- Send me any additional details you'd like included in this README.
+admin-svc/
+├── cmd/main.go                  # Entry point, wiring
+├── internal/
+│   ├── config/config.go         # YAML config loader
+│   ├── docker/checker.go        # Docker container checks
+│   ├── health/checker.go        # HTTP / curl / page checks
+│   ├── telegram/notifier.go     # Telegram message sender
+│   └── scheduler/cron.go        # Orchestrator + alert deduplication
+├── config.yaml
+├── Dockerfile
+└── docker-compose.yml
+```

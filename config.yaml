@@ -1,0 +1,53 @@
+telegram:
+  bot_token: "${TELEGRAM_BOT_TOKEN}"
+  chat_id: "${TELEGRAM_CHAT_ID}"
+
+scheduler:
+  interval_seconds: 60  # How often to run all checks
+
+docker:
+  enabled: true
+  containers:
+    - name: "nginx"
+      alert_on_stopped: true
+    - name: "postgres"
+      alert_on_stopped: true
+    - name: "redis"
+      alert_on_stopped: true
+
+health_checks:
+  enabled: true
+  timeout_seconds: 10
+  endpoints:
+    - name: "API Service"
+      url: "http://localhost:8080/health"
+      expected_status: 200
+    - name: "Admin Panel"
+      url: "http://localhost:3000/health"
+      expected_status: 200
+
+curl_checks:
+  enabled: true
+  timeout_seconds: 15
+  requests:
+    - name: "Auth API Login"
+      method: "POST"
+      url: "http://localhost:8080/api/v1/auth/ping"
+      headers:
+        Content-Type: "application/json"
+        Authorization: "Bearer YOUR_TOKEN"
+      body: '{"ping": true}'
+      expected_status: 200
+
+page_checks:
+  enabled: true
+  timeout_seconds: 15
+  pages:
+    - name: "Landing Page"
+      url: "https://yourdomain.com"
+      expected_status: 200
+      contains_text: ""   # optional: check page contains this string
+    - name: "Dashboard"
+      url: "https://yourdomain.com/dashboard"
+      expected_status: 200
+      contains_text: ""
