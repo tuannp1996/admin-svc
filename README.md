@@ -82,15 +82,20 @@ Add these in **GitHub → Settings → Secrets and variables → Actions**:
 On your VPS, make sure:
 
 1. Docker and Docker Compose are installed.
-2. The repository is cloned at `VPS_APP_DIR`.
+2. SSH access from VPS to this GitHub repository is configured (for `git clone/pull`).
 3. `config.yaml` and required environment variables are set for runtime.
 4. The SSH user has permission to run Docker commands.
 
 Deployment command executed by the workflow:
 
 ```bash
-cd "$VPS_APP_DIR"
-git pull --ff-only origin main
+if [ -d "$VPS_APP_DIR/.git" ]; then
+  cd "$VPS_APP_DIR"
+  git pull --ff-only origin main
+else
+  git clone --branch main "git@github.com:<owner>/<repo>.git" "$VPS_APP_DIR"
+  cd "$VPS_APP_DIR"
+fi
 docker compose up -d --build
 ```
 

@@ -46,8 +46,21 @@ jobs:
           script_stop: true
           script: |
             set -e
-            cd "${{ secrets.VPS_APP_DIR }}"
-            git pull --ff-only origin main
+            APP_DIR="${{ secrets.VPS_APP_DIR }}"
+            REPO_SSH_URL="git@github.com:${{ github.repository }}.git"
+
+            mkdir -p "$APP_DIR"
+
+            if [ -d "$APP_DIR/.git" ]; then
+              cd "$APP_DIR"
+              git fetch origin main
+              git checkout main
+              git pull --ff-only origin main
+            else
+              git clone --branch main "$REPO_SSH_URL" "$APP_DIR"
+              cd "$APP_DIR"
+            fi
+
             docker compose up -d --build
             docker image prune -f
             docker compose ps
