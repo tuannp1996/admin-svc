@@ -60,6 +60,40 @@ go build -o admin-svc ./cmd/main.go
 
 All values in `config.yaml` support `${ENV_VAR}` substitution, so you can keep secrets out of the file.
 
+## GitHub Actions CI/CD (Deploy to VPS)
+
+This repo includes a workflow at `.github/workflows/cicd.yml`.
+
+- On every pull request: runs `go test ./...` and validates Docker build.
+- On push to `main`: runs CI, then deploys to VPS over SSH.
+
+### Required GitHub Secrets
+
+Add these in **GitHub → Settings → Secrets and variables → Actions**:
+
+- `VPS_HOST`: VPS IP or domain.
+- `VPS_USER`: SSH user used for deployment.
+- `VPS_SSH_KEY`: Private SSH key (PEM/OpenSSH format) for `VPS_USER`.
+- `VPS_PORT`: SSH port (usually `22`).
+- `VPS_APP_DIR`: Absolute path on VPS where this repository exists.
+
+### VPS prerequisites
+
+On your VPS, make sure:
+
+1. Docker and Docker Compose are installed.
+2. The repository is cloned at `VPS_APP_DIR`.
+3. `config.yaml` and required environment variables are set for runtime.
+4. The SSH user has permission to run Docker commands.
+
+Deployment command executed by the workflow:
+
+```bash
+cd "$VPS_APP_DIR"
+git pull --ff-only origin main
+docker compose up -d --build
+```
+
 ## How to get a Telegram bot
 
 1. Message [@BotFather](https://t.me/BotFather) → `/newbot`
