@@ -1,4 +1,13 @@
+name: CI/CD
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
 jobs:
+  name: CI/CD
   ci:
     name: Test And Build
     runs-on: ubuntu-latest
