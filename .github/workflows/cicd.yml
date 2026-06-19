@@ -82,19 +82,17 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || '22' }}
           script_stop: true
-          envs: GH_TOKEN,GITHUB_ACTOR,GITHUB_REPOSITORY,REGISTRY,IMAGE_NAME,SHORT_SHA
+          envs: GH_TOKEN,GITHUB_ACTOR,GITHUB_REPOSITORY,REGISTRY,IMAGE_NAME
           script: |
             set -e
 
             IMAGE="${REGISTRY}/${IMAGE_NAME}:latest"
-            SHA_TAG="${REGISTRY}/${IMAGE_NAME}:sha-${SHORT_SHA}"
             APP_DIR="${{ secrets.VPS_APP_DIR }}"
             REPO_URL="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
 
             echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
 
-            docker pull "$SHA_TAG"
-            docker tag  "$SHA_TAG" "$IMAGE"
+            docker pull "$IMAGE"
 
             mkdir -p "$APP_DIR"
             if [ -d "$APP_DIR/.git" ]; then
@@ -106,17 +104,16 @@ jobs:
               git clone --depth 1 --branch main "$REPO_URL" "$APP_DIR"
             fi
 
-            cd "$APP_DIR"
-            test -f docker-compose.yml
+            COMPOSE_FILE="$APP_DIR/docker-compose.yml"
+            test -f "$COMPOSE_FILE"
 
             export DOCKER_IMAGE="$IMAGE"
-            docker compose up -d --no-build
+            docker compose -f "$COMPOSE_FILE" up -d --no-build
             docker image prune -f
-            docker compose ps
+            docker compose -f "$COMPOSE_FILE" ps
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           REGISTRY: ${{ env.REGISTRY }}
           IMAGE_NAME: ${{ github.repository }}
-          SHORT_SHA: ${{ needs.ci.outputs.image_tag }}  # <-- comes from ci job output
