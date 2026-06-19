@@ -2,6 +2,7 @@ version: "3.9"
 
 services:
   admin-svc:
+    image: ${DOCKER_IMAGE:-admin-svc:local}
     build: .
     container_name: admin-svc
     restart: unless-stopped
