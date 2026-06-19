@@ -7,7 +7,6 @@ on:
       - main
 
 jobs:
-  name: CI/CD
   ci:
     name: Test And Build
     runs-on: ubuntu-latest
