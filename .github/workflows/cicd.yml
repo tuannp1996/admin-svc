@@ -1,23 +1,18 @@
-name: CI/CD
-
-on:
-  pull_request:
-  push:
-    branches:
-      - main
-
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
-
 jobs:
   ci:
     name: Test And Build
     runs-on: ubuntu-latest
 
+    outputs:
+      image_tag: ${{ steps.sha.outputs.short }}   # <-- share with deploy job
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Compute short SHA
+        id: sha
+        run: echo "short=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -47,7 +42,7 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=sha,prefix=sha-
+            type=sha,prefix=sha-,format=short   # produces sha-abc1234 (7 chars)
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
 
       - name: Build and Push Docker Image
@@ -75,14 +70,15 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || '22' }}
           script_stop: true
+          envs: GH_TOKEN,GITHUB_ACTOR,REGISTRY,IMAGE_NAME,SHORT_SHA
           script: |
             set -e
 
-            IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
-            SHA_TAG="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}"
+            IMAGE="${REGISTRY}/${IMAGE_NAME}:latest"
+            SHA_TAG="${REGISTRY}/${IMAGE_NAME}:sha-${SHORT_SHA}"
             APP_DIR="${{ secrets.VPS_APP_DIR }}"
 
-            echo "${{ secrets.GH_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
 
             docker pull "$SHA_TAG"
             docker tag  "$SHA_TAG" "$IMAGE"
@@ -90,8 +86,13 @@ jobs:
             mkdir -p "$APP_DIR"
             cd "$APP_DIR"
 
-            # Inline the image name so compose uses the pre-built image
             export DOCKER_IMAGE="$IMAGE"
             docker compose up -d --no-build
             docker image prune -f
             docker compose ps
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          GITHUB_ACTOR: ${{ github.actor }}
+          REGISTRY: ${{ env.REGISTRY }}
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
+          SHORT_SHA: ${{ needs.ci.outputs.image_tag }}  # <-- comes from ci job output
