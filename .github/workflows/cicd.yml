@@ -89,6 +89,7 @@ jobs:
 
       - name: Check docker-compose.yml exists on VPS
         id: check_compose
+        continue-on-error: true
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.VPS_HOST }}
@@ -97,15 +98,10 @@ jobs:
           port: ${{ secrets.VPS_PORT || '22' }}
           script_stop: true
           script: |
-            set -e
-            if [ -f "${{ secrets.VPS_APP_DIR }}/docker-compose.yml" ]; then
-              echo "exists"
-            else
-              echo "missing"
-            fi
+            test -f "${{ secrets.VPS_APP_DIR }}/docker-compose.yml"
 
       - name: Copy docker-compose.yml to VPS (only if missing)
-        if: contains(steps.check_compose.outputs.stdout, 'missing')
+        if: steps.check_compose.outcome == 'failure'
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.VPS_HOST }}
