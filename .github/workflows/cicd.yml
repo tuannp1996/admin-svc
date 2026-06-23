@@ -74,6 +74,47 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
     steps:
+      - name: Ensure app directory exists on VPS
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || '22' }}
+          script_stop: true
+          script: |
+            set -euxo pipefail
+
+            mkdir -p "${{ secrets.VPS_APP_DIR }}"
+
+      - name: Check docker-compose.yml exists on VPS
+        id: check_compose
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || '22' }}
+          script_stop: true
+          script: |
+            set -e
+            if [ -f "${{ secrets.VPS_APP_DIR }}/docker-compose.yml" ]; then
+              echo "exists"
+            else
+              echo "missing"
+            fi
+
+      - name: Copy docker-compose.yml to VPS (only if missing)
+        if: contains(steps.check_compose.outputs.stdout, 'missing')
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || '22' }}
+          source: docker-compose.yml
+          target: ${{ secrets.VPS_APP_DIR }}
+
       - name: Deploy Over SSH
         uses: appleboy/ssh-action@v1.2.0
         with:
@@ -84,25 +125,14 @@ jobs:
           script_stop: true
           envs: GH_TOKEN,GITHUB_ACTOR,GITHUB_REPOSITORY,REGISTRY,IMAGE_NAME
           script: |
-            set -e
+            set -euxo pipefail
 
             IMAGE="${REGISTRY}/${IMAGE_NAME}:latest"
             APP_DIR="${{ secrets.VPS_APP_DIR }}"
-            REPO_URL="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
 
             echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
 
             docker pull "$IMAGE"
-
-            mkdir -p "$APP_DIR"
-            if [ -d "$APP_DIR/.git" ]; then
-              git -C "$APP_DIR" fetch origin main
-              git -C "$APP_DIR" checkout main
-              git -C "$APP_DIR" pull --ff-only origin main
-            else
-              rm -rf "$APP_DIR"
-              git clone --depth 1 --branch main "$REPO_URL" "$APP_DIR"
-            fi
 
             COMPOSE_FILE="$APP_DIR/docker-compose.yml"
             test -f "$COMPOSE_FILE"
