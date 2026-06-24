@@ -3,9 +3,11 @@ package telegram
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -15,6 +17,20 @@ type Notifier struct {
 	botToken string
 	chatID   string
 	client   *http.Client
+	maxRetries int
+	retryDelay time.Duration
+}
+
+type telegramAPIError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *telegramAPIError) Error() string {
+	if strings.TrimSpace(e.Body) != "" {
+		return fmt.Sprintf("telegram responded with status %d: %s", e.StatusCode, strings.TrimSpace(e.Body))
+	}
+	return fmt.Sprintf("telegram responded with status %d", e.StatusCode)
 }
 
 type sendMessageRequest struct {
@@ -27,10 +43,26 @@ func New(botToken, chatID string) *Notifier {
 	botToken = normalizeBotToken(botToken)
 	chatID = strings.TrimSpace(chatID)
 
+	transport := &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   5 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		TLSHandshakeTimeout:   5 * time.Second,
+		ResponseHeaderTimeout: 10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+
 	return &Notifier{
 		botToken: botToken,
 		chatID:   chatID,
-		client:   &http.Client{Timeout: 10 * time.Second},
+		client: &http.Client{
+			Timeout:   15 * time.Second,
+			Transport: transport,
+		},
+		maxRetries: 2,
+		retryDelay: 700 * time.Millisecond,
 	}
 }
 
@@ -89,6 +121,30 @@ func (n *Notifier) send(text string) error {
 		return fmt.Errorf("marshal: %w", err)
 	}
 
+	var lastErr error
+	for attempt := 0; attempt <= n.maxRetries; attempt++ {
+		if attempt > 0 {
+			wait := n.retryDelay * time.Duration(attempt)
+			log.Printf("[telegram] retrying send (attempt %d/%d) in %s", attempt+1, n.maxRetries+1, wait)
+			time.Sleep(wait)
+		}
+
+		if err := n.sendOnce(body); err != nil {
+			lastErr = err
+			if !isRetryable(err) {
+				return err
+			}
+			continue
+		}
+
+		log.Printf("[telegram] message sent: %q", truncate(text, 60))
+		return nil
+	}
+
+	return lastErr
+}
+
+func (n *Notifier) sendOnce(body []byte) error {
 	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", n.botToken)
 	resp, err := n.client.Post(url, "application/json", bytes.NewReader(body))
 	if err != nil {
@@ -98,14 +154,32 @@ func (n *Notifier) send(text string) error {
 
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		if len(b) > 0 {
-			return fmt.Errorf("telegram responded with status %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+		return &telegramAPIError{
+			StatusCode: resp.StatusCode,
+			Body:       string(b),
 		}
-		return fmt.Errorf("telegram responded with status %d", resp.StatusCode)
 	}
 
-	log.Printf("[telegram] message sent: %q", truncate(text, 60))
 	return nil
+}
+
+func isRetryable(err error) bool {
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+
+	var apiErr *telegramAPIError
+	if errors.As(err, &apiErr) {
+		if apiErr.StatusCode == http.StatusTooManyRequests {
+			return true
+		}
+		if apiErr.StatusCode >= http.StatusInternalServerError {
+			return true
+		}
+	}
+
+	return false
 }
 
 func escapeMarkdown(s string) string {
