@@ -3,7 +3,7 @@ telegram:
   chat_id: "${TELEGRAM_CHAT_ID}"
 
 scheduler:
-  interval_seconds: 60  # How often to run all checks
+  interval_seconds: 300  # How often to run all checks
 
 docker:
   enabled: true
@@ -22,9 +22,9 @@ health_checks:
     - name: "API Service"
       url: "http://localhost:8089/health"
       expected_status: 200
-    - name: "Admin Panel"
-      url: "http://localhost:3000/health"
-      expected_status: 200
+    # - name: "Admin Panel"
+    #   url: "http://localhost:3000/health"
+    #   expected_status: 200
 
 # curl_checks:
 #   enabled: true
