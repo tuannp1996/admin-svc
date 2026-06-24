@@ -114,6 +114,46 @@ jobs:
           source: docker-compose.yml
           target: ${{ secrets.VPS_APP_DIR }}
 
+      - name: Ensure config.yaml path is not a directory on VPS
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || '22' }}
+          script_stop: true
+          script: |
+            set -euxo pipefail
+
+            CONFIG_PATH="${{ secrets.VPS_APP_DIR }}/config.yaml"
+            if [ -d "$CONFIG_PATH" ]; then
+              rm -rf "$CONFIG_PATH"
+            fi
+
+      - name: Check config.yaml exists on VPS
+        id: check_config
+        continue-on-error: true
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || '22' }}
+          script_stop: true
+          script: |
+            test -f "${{ secrets.VPS_APP_DIR }}/config.yaml"
+
+      - name: Copy config.yaml to VPS (only if missing)
+        if: steps.check_config.outcome == 'failure'
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || '22' }}
+          source: config.yaml
+          target: ${{ secrets.VPS_APP_DIR }}
+
       - name: Deploy Over SSH
         uses: appleboy/ssh-action@v1.2.0
         with:
