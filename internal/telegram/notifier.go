@@ -71,6 +71,13 @@ func (n *Notifier) SendStartup(checks []string) error {
 }
 
 func (n *Notifier) send(text string) error {
+	if n.botToken == "" {
+		return fmt.Errorf("telegram bot token is empty")
+	}
+	if n.chatID == "" {
+		return fmt.Errorf("telegram chat id is empty")
+	}
+
 	payload := sendMessageRequest{
 		ChatID:    n.chatID,
 		Text:      text,

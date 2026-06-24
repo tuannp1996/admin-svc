@@ -11,10 +11,8 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       # Mount config (so you can edit without rebuilding)
       - ./config.yaml:/app/config.yaml:ro
-    environment:
-      # Override config values via env vars (config.yaml uses ${VAR} syntax)
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+      # Mount .env so the app can load secrets at startup
+      - ./.env:/app/.env:ro
     logging:
       driver: "json-file"
       options:
