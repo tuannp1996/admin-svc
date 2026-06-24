@@ -1,9 +1,11 @@
 package health
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -109,6 +111,10 @@ type PageConfig struct {
 
 func (c *Checker) CheckPage(cfg PageConfig) Result {
 	resp, err := c.client.Get(cfg.URL)
+	if isTimeoutError(err) {
+		log.Printf("[page] %s timeout, retrying once", cfg.Name)
+		resp, err = c.client.Get(cfg.URL)
+	}
 	if err != nil {
 		log.Printf("[page] %s error: %v", cfg.Name, err)
 		return Result{Name: cfg.Name, URL: cfg.URL, OK: false, Detail: err.Error()}
@@ -132,4 +138,12 @@ func (c *Checker) CheckPage(cfg PageConfig) Result {
 	}
 
 	return Result{Name: cfg.Name, URL: cfg.URL, OK: true, Status: resp.StatusCode}
+}
+
+func isTimeoutError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr) && netErr.Timeout()
 }

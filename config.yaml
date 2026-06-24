@@ -41,7 +41,7 @@ health_checks:
 
 page_checks:
   enabled: true
-  timeout_seconds: 15
+  timeout_seconds: 30
   pages:
     - name: "Landing Page"
       url: "https://financi.vn"

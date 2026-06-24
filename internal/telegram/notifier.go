@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -22,6 +24,9 @@ type sendMessageRequest struct {
 }
 
 func New(botToken, chatID string) *Notifier {
+	botToken = normalizeBotToken(botToken)
+	chatID = strings.TrimSpace(chatID)
+
 	return &Notifier{
 		botToken: botToken,
 		chatID:   chatID,
@@ -85,6 +90,10 @@ func (n *Notifier) send(text string) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		if len(b) > 0 {
+			return fmt.Errorf("telegram responded with status %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+		}
 		return fmt.Errorf("telegram responded with status %d", resp.StatusCode)
 	}
 
@@ -122,4 +131,10 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "..."
+}
+
+func normalizeBotToken(token string) string {
+	token = strings.TrimSpace(token)
+	// Some users provide "bot<token>" from cURL examples.
+	return strings.TrimPrefix(token, "bot")
 }
