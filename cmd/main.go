@@ -1,21 +1,25 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
+	"time"
 
+	"admin-svc/internal/blog"
 	"admin-svc/internal/config"
 	"admin-svc/internal/docker"
-	"admin-svc/internal/scheduler"
-	"admin-svc/internal/telegram"
+	telegrampkg "admin-svc/internal/infrastructure/telegram"
+	"admin-svc/internal/service"
 )
 
 func main() {
 	configPath := flag.String("config", "config.yaml", "path to config file")
-	envPath    := flag.String("env", ".env", "path to .env file")
+	envPath := flag.String("env", ".env", "path to .env file")
 	flag.Parse()
 
 	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
@@ -32,7 +36,8 @@ func main() {
 		log.Fatalf("[main] config: %v", err)
 	}
 
-	notifier := telegram.New(cfg.Telegram.BotToken, cfg.Telegram.ChatID)
+	notifier := telegrampkg.New(cfg.Telegram.BotToken, cfg.Telegram.ChatID)
+	blogClient := blog.New(cfg.BlogGen)
 
 	var dockerChecker *docker.Checker
 	if cfg.Docker.Enabled {
@@ -43,7 +48,10 @@ func main() {
 		}
 	}
 
-	sched := scheduler.New(cfg, notifier, dockerChecker)
+	statistics := service.New(cfg, notifier, dockerChecker)
+
+	_, cancelCommands := startTelegramBotCommands(notifier, statistics, blogClient)
+	defer cancelCommands()
 
 	checks := collectEnabledChecks(cfg)
 	if err := notifier.SendStartup(checks); err != nil {
@@ -53,10 +61,11 @@ func main() {
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
-	go sched.Start()
+	go statistics.Start()
 
 	sig := <-quit
 	log.Printf("[main] received signal %s, shutting down", sig)
+	cancelCommands()
 	if dockerChecker != nil {
 		dockerChecker.Close()
 	}
@@ -85,4 +94,37 @@ func collectEnabledChecks(cfg *config.Config) []string {
 		}
 	}
 	return list
+}
+
+func startTelegramBotCommands(notifier *telegrampkg.Notifier, statistic *service.Statistics, blogClient *blog.Client) (context.Context, context.CancelFunc) {
+	commandCtx, cancelCommands := context.WithCancel(context.Background())
+
+	go notifier.StartCommandListener(commandCtx, map[string]telegrampkg.CommandHandler{
+		"/status": func(ctx context.Context, input string) (string, error) {
+			return statistic.StatusSummary(), nil
+		},
+		"/restart": func(ctx context.Context, input string) (string, error) {
+			go func() {
+				time.Sleep(2 * time.Second)
+				os.Exit(0)
+			}()
+			return "Restarting admin-svc...", nil
+		},
+		"/blog_gen": func(ctx context.Context, input string) (string, error) {
+			return triggerBlog(ctx, blogClient, input)
+		},
+		"/gen_blog": func(ctx context.Context, input string) (string, error) {
+			return triggerBlog(ctx, blogClient, input)
+		},
+	})
+
+	return commandCtx, cancelCommands
+}
+
+func triggerBlog(ctx context.Context, blogClient *blog.Client, input string) (string, error) {
+	status, detail, err := blogClient.Trigger(ctx, input)
+	if err != nil {
+		return "", err
+	}
+	return "auto_blog triggered successfully\nHTTP status: " + strconv.Itoa(status) + "\nResponse: " + detail, nil
 }

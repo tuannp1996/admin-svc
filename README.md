@@ -13,6 +13,28 @@ Lightweight Go service that monitors your server and sends Telegram alerts.
 
 Alerts are **deduplicated**: you get one alert when something breaks, and one recovery message when it comes back. No spam.
 
+## Telegram commands
+
+The bot now supports runtime commands from the configured `chat_id`:
+
+- `/status`: returns current monitor summary and number of active alerts.
+- `/restart`: restarts `admin-svc` process (works with Docker `restart: unless-stopped`).
+- `/blog_gen <topic>` or `/gen_blog <topic>`: triggers external `auto_blog` service via HTTP. When a topic is provided, the request body is `{"topic":"<topic>"}`.
+
+Configure `/blog_gen` and `/gen_blog` target in `config.yaml`:
+
+```yaml
+blog_gen:
+  enabled: true
+  url: "http://localhost:8090/auto_blog/generate"
+  method: "POST"
+  headers:
+    Content-Type: "application/json"
+  body: "{}"
+  expected_status: 200
+  timeout_seconds: 60
+```
+
 ## Quick start
 
 ### 1. Configure
@@ -110,12 +132,18 @@ docker compose up -d --build
 ```
 admin-svc/
 ├── cmd/main.go                  # Entry point, wiring
+├── cmd/telegram_commands.go     # Telegram command handlers composition
 ├── internal/
+│   ├── domain/notification.go   # Core entity
 │   ├── config/config.go         # YAML config loader
+│   ├── usecase/port/notifier.go # Usecase port
+│   ├── usecase/notification/     # Notification usecase
 │   ├── docker/checker.go        # Docker container checks
 │   ├── health/checker.go        # HTTP / curl / page checks
-│   ├── telegram/notifier.go     # Telegram message sender
-│   └── scheduler/cron.go        # Orchestrator + alert deduplication
+│   ├── service/statistics.go    # Orchestrator + alert deduplication
+│   ├── infrastructure/telegram/ # Telegram adapter implementation
+│   ├── scheduler/cron.go        # Compatibility wrapper to service
+│   └── telegram/notifier.go     # Compatibility wrapper to infrastructure
 ├── config.yaml
 ├── Dockerfile
 └── docker-compose.yml

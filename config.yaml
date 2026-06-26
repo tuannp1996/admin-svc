@@ -51,3 +51,13 @@ page_checks:
     #   url: "https://financi.vn/dashboard"
     #   expected_status: 200
     #   contains_text: ""
+
+blog_gen:
+  enabled: true
+  url: "http://localhost:8089/api/admin/generate-article"
+  method: "POST"
+  headers:
+    Content-Type: "application/json"
+  body: "{}"
+  expected_status: 200
+  timeout_seconds: 60

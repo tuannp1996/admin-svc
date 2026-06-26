@@ -15,6 +15,7 @@ type Config struct {
 	HealthChecks HealthChecksConfig `yaml:"health_checks"`
 	CurlChecks   CurlChecksConfig   `yaml:"curl_checks"`
 	PageChecks   PageChecksConfig   `yaml:"page_checks"`
+	BlogGen      BlogGenConfig      `yaml:"blog_gen"`
 }
 
 type TelegramConfig struct {
@@ -74,6 +75,16 @@ type PageCheck struct {
 	URL            string `yaml:"url"`
 	ExpectedStatus int    `yaml:"expected_status"`
 	ContainsText   string `yaml:"contains_text"`
+}
+
+type BlogGenConfig struct {
+	Enabled        bool              `yaml:"enabled"`
+	URL            string            `yaml:"url"`
+	Method         string            `yaml:"method"`
+	Headers        map[string]string `yaml:"headers"`
+	Body           string            `yaml:"body"`
+	ExpectedStatus int               `yaml:"expected_status"`
+	TimeoutSeconds int               `yaml:"timeout_seconds"`
 }
 
 // LoadEnv reads a .env file and injects variables into the process environment.
@@ -156,6 +167,15 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.PageChecks.TimeoutSeconds <= 0 {
 		cfg.PageChecks.TimeoutSeconds = 15
+	}
+	if cfg.BlogGen.Method == "" {
+		cfg.BlogGen.Method = "POST"
+	}
+	if cfg.BlogGen.ExpectedStatus <= 0 {
+		cfg.BlogGen.ExpectedStatus = 200
+	}
+	if cfg.BlogGen.TimeoutSeconds <= 0 {
+		cfg.BlogGen.TimeoutSeconds = 30
 	}
 
 	return &cfg, nil
