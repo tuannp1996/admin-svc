@@ -100,31 +100,6 @@ jobs:
           source: docker-compose.yml
           target: ${{ secrets.VPS_APP_DIR }}
 
-      - name: Write .env to VPS
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          port: ${{ secrets.VPS_PORT || '22' }}
-          script_stop: true
-          envs: TELEGRAM_BOT_TOKEN,TELEGRAM_CHAT_ID
-          script: |
-            set -euxo pipefail
-
-            APP_DIR="${{ secrets.VPS_APP_DIR }}"
-            ENV_FILE="$APP_DIR/.env"
-
-            if [ -d "$ENV_FILE" ]; then
-              rm -rf "$ENV_FILE"
-            fi
-
-            printf 'TELEGRAM_BOT_TOKEN=%s\nTELEGRAM_CHAT_ID=%s\n' "$TELEGRAM_BOT_TOKEN" "$TELEGRAM_CHAT_ID" > "$ENV_FILE"
-            chmod 644 "$ENV_FILE"
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-
       - name: Ensure config.yaml path is not a directory on VPS
         uses: appleboy/ssh-action@v1.2.0
         with:
