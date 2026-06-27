@@ -100,6 +100,8 @@ func (c *ApiClient) Trigger(ctx context.Context, topic string) (int, string, err
 	detail := strings.TrimSpace(string(responseBody))
 	if detail == "" {
 		detail = "(empty response body)"
+	} else {
+		detail = prettyJSON([]byte(detail))
 	}
 
 	if resp.StatusCode != c.Cfg.ExpectedStatus {
@@ -107,4 +109,12 @@ func (c *ApiClient) Trigger(ctx context.Context, topic string) (int, string, err
 	}
 
 	return resp.StatusCode, detail, nil
+}
+
+func prettyJSON(data []byte) string {
+	var out bytes.Buffer
+	if err := json.Indent(&out, data, "", "  "); err != nil {
+		return strings.TrimSpace(string(data))
+	}
+	return out.String()
 }

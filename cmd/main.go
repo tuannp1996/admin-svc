@@ -144,5 +144,5 @@ func triggerApiClient(ctx context.Context, c *client.ApiClient, input string) (s
 	if err != nil {
 		return "", err
 	}
-	return "auto_blog triggered successfully\nHTTP status: " + strconv.Itoa(status) + "\nResponse: " + detail, nil
+	return *c.Cfg.Name + " triggered successfully\nHTTP status: " + strconv.Itoa(status) + "\nResponse:\n" + detail, nil
 }
