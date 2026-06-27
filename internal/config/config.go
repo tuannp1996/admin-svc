@@ -89,8 +89,8 @@ type ServiceConfig struct {
 }
 
 type APIConfig struct {
-	Enabled        bool              `yaml:"enabled"`
 	Name           *string           `yaml:"name"`
+	Enabled        bool              `yaml:"enabled"`
 	URL            string            `yaml:"url"`
 	Method         string            `yaml:"method"`
 	Headers        map[string]string `yaml:"headers"`

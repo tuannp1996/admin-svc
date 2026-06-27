@@ -57,26 +57,28 @@ page_checks:
     #   url: "https://financi.vn/dashboard"
     #   expected_status: 200
     #   contains_text: ""
-
-service:
-  - name: "BLOG Gen Article"
-    enabled: true
-    api:
+clients:
+  timeout_seconds: 30
+  service:
+    - name: "BLOG-AUTO"
       enabled: true
-      url: "http://localhost:8089/api/admin/generate-article"
-      method: "POST"
-      headers:
-        Content-Type: "application/json"
-      body: "{}"
-      expected_status: 200
-      timeout_seconds: 60
-  - name: "TIKTOK Get Users"
-    enabled: true
-    api:
+      api:
+        - name: "BLOG Gen Article"
+          enabled: true
+          url: "http://localhost:8089/api/admin/generate-article"
+          method: "POST"
+          headers:
+            Content-Type: "application/json"
+          body: "{}"
+          expected_status: 200
+    - name: "TIKTOK-CONNECTOR"
       enabled: true
-      url: "http://localhost:3030/users"
-      method: "GET"
-      headers:
-        Content-Type: "application/json"
-      expected_status: 200
-      timeout_seconds: 60
+      api:
+        - name: "TIKTOK Get Users"
+          enabled: true
+          url: "http://localhost:3030/users"
+          method: "GET"
+          headers:
+            Content-Type: "application/json"
+          body: "{}"
+          expected_status: 200
