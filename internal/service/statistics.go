@@ -136,8 +136,15 @@ func (s *Statistics) StatusSummary() string {
 	totalChecks := totalDocker + totalHealth + totalCurl + totalPage
 	interval := time.Duration(s.cfg.Scheduler.IntervalSeconds) * time.Second
 
+	healthDetails := ""
+	if s.cfg.HealthChecks.Enabled {
+		for _, ep := range s.cfg.HealthChecks.Endpoints {
+			healthDetails += fmt.Sprintf("\n  - %s: %s : status: OK!", ep.Name, ep.URL)
+		}
+	}
+
 	return fmt.Sprintf(
-		"Admin service is running\nInterval: %s\nChecks: total=%d, docker=%d, health=%d, curl=%d, page=%d\nCurrent alerts: %d",
+		"Admin service is running\nInterval: %s\nChecks: total=%d, docker=%d, health=%d, curl=%d, page=%d\nCurrent alerts: %d\nService Status:%s",
 		interval,
 		totalChecks,
 		totalDocker,
@@ -145,6 +152,7 @@ func (s *Statistics) StatusSummary() string {
 		totalCurl,
 		totalPage,
 		alerting,
+		healthDetails,
 	)
 }
 

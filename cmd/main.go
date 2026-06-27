@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	"admin-svc/internal/blog"
+	"admin-svc/internal/client"
 	"admin-svc/internal/config"
 	"admin-svc/internal/docker"
 	telegrampkg "admin-svc/internal/infrastructure/telegram"
@@ -37,7 +37,7 @@ func main() {
 	}
 
 	notifier := telegrampkg.New(cfg.Telegram.BotToken, cfg.Telegram.ChatID)
-	blogClient := blog.New(cfg.BlogGen)
+	services := client.New(cfg.Clients)
 
 	var dockerChecker *docker.Checker
 	if cfg.Docker.Enabled {
@@ -50,7 +50,7 @@ func main() {
 
 	statistics := service.New(cfg, notifier, dockerChecker)
 
-	_, cancelCommands := startTelegramBotCommands(notifier, statistics, blogClient)
+	_, cancelCommands := startTelegramBotCommands(notifier, statistics, services)
 	defer cancelCommands()
 
 	checks := collectEnabledChecks(cfg)
@@ -96,7 +96,7 @@ func collectEnabledChecks(cfg *config.Config) []string {
 	return list
 }
 
-func startTelegramBotCommands(notifier *telegrampkg.Notifier, statistic *service.Statistics, blogClient *blog.Client) (context.Context, context.CancelFunc) {
+func startTelegramBotCommands(notifier *telegrampkg.Notifier, statistic *service.Statistics, services *[]client.Service) (context.Context, context.CancelFunc) {
 	commandCtx, cancelCommands := context.WithCancel(context.Background())
 
 	go notifier.StartCommandListener(commandCtx, map[string]telegrampkg.CommandHandler{
@@ -111,18 +111,36 @@ func startTelegramBotCommands(notifier *telegrampkg.Notifier, statistic *service
 			return "Restarting admin-svc...", nil
 		},
 		"/blog_gen": func(ctx context.Context, input string) (string, error) {
-			return triggerBlog(ctx, blogClient, input)
+			var blogClient *client.ApiClient
+			for _, s := range *services {
+				for _, c := range s.ApiClients {
+					if c.Cfg.Name != nil && *c.Cfg.Name == "BLOG Gen Article" && c.Cfg.Enabled {
+						blogClient = c
+						break
+					}
+				}
+			}
+			return triggerApiClient(ctx, blogClient, input)
 		},
-		"/gen_blog": func(ctx context.Context, input string) (string, error) {
-			return triggerBlog(ctx, blogClient, input)
+		"/tik_users": func(ctx context.Context, input string) (string, error) {
+			var tikClient *client.ApiClient
+			for _, s := range *services {
+				for _, c := range s.ApiClients {
+					if c.Cfg.Name != nil && *c.Cfg.Name == "TIKTOK Get Users" && c.Cfg.Enabled {
+						tikClient = c
+						break
+					}
+				}
+			}
+			return triggerApiClient(ctx, tikClient, "")
 		},
 	})
 
 	return commandCtx, cancelCommands
 }
 
-func triggerBlog(ctx context.Context, blogClient *blog.Client, input string) (string, error) {
-	status, detail, err := blogClient.Trigger(ctx, input)
+func triggerApiClient(ctx context.Context, c *client.ApiClient, input string) (string, error) {
+	status, detail, err := c.Trigger(ctx, input)
 	if err != nil {
 		return "", err
 	}

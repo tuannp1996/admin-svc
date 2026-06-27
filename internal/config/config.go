@@ -15,7 +15,7 @@ type Config struct {
 	HealthChecks HealthChecksConfig `yaml:"health_checks"`
 	CurlChecks   CurlChecksConfig   `yaml:"curl_checks"`
 	PageChecks   PageChecksConfig   `yaml:"page_checks"`
-	BlogGen      BlogGenConfig      `yaml:"blog_gen"`
+	Clients      ClientConfig       `yaml:"clients"`
 }
 
 type TelegramConfig struct {
@@ -75,6 +75,27 @@ type PageCheck struct {
 	URL            string `yaml:"url"`
 	ExpectedStatus int    `yaml:"expected_status"`
 	ContainsText   string `yaml:"contains_text"`
+}
+
+type ClientConfig struct {
+	TimeoutSeconds int             `yaml:"timeout_seconds"`
+	Service        []ServiceConfig `yaml:"service"`
+}
+
+type ServiceConfig struct {
+	Enabled bool        `yaml:"enabled"`
+	Name    *string     `yaml:"name"`
+	API     []APIConfig `yaml:"api"`
+}
+
+type APIConfig struct {
+	Enabled        bool              `yaml:"enabled"`
+	Name           *string           `yaml:"name"`
+	URL            string            `yaml:"url"`
+	Method         string            `yaml:"method"`
+	Headers        map[string]string `yaml:"headers"`
+	Body           string            `yaml:"body"`
+	ExpectedStatus int               `yaml:"expected_status"`
 }
 
 type BlogGenConfig struct {
@@ -167,15 +188,6 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.PageChecks.TimeoutSeconds <= 0 {
 		cfg.PageChecks.TimeoutSeconds = 15
-	}
-	if cfg.BlogGen.Method == "" {
-		cfg.BlogGen.Method = "POST"
-	}
-	if cfg.BlogGen.ExpectedStatus <= 0 {
-		cfg.BlogGen.ExpectedStatus = 200
-	}
-	if cfg.BlogGen.TimeoutSeconds <= 0 {
-		cfg.BlogGen.TimeoutSeconds = 30
 	}
 
 	return &cfg, nil

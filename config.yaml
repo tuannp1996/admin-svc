@@ -3,7 +3,7 @@ telegram:
   chat_id: "${TELEGRAM_CHAT_ID}"
 
 scheduler:
-  interval_seconds: 300  # How often to run all checks
+  interval_seconds: 150  # How often to run all checks
 
 docker:
   enabled: true
@@ -19,12 +19,18 @@ health_checks:
   enabled: true
   timeout_seconds: 10
   endpoints:
-    - name: "API Service"
+    - name: "Financi API Service"
       url: "http://localhost:8089/health"
       expected_status: 200
-    # - name: "Admin Panel"
-    #   url: "http://localhost:3000/health"
-    #   expected_status: 200
+    - name: "Auto Blog Service"
+      url: "http://localhost:8087/health"
+      expected_status: 200
+    - name: "Tiktok Connector Service"
+      url: "http://localhost:3030/health"
+      expected_status: 200
+    - name: "Go Analytics Service"
+      url: "http://localhost:8082/health"
+      expected_status: 200
 
 # curl_checks:
 #   enabled: true
@@ -52,12 +58,25 @@ page_checks:
     #   expected_status: 200
     #   contains_text: ""
 
-blog_gen:
-  enabled: true
-  url: "http://localhost:8089/api/admin/generate-article"
-  method: "POST"
-  headers:
-    Content-Type: "application/json"
-  body: "{}"
-  expected_status: 200
-  timeout_seconds: 60
+service:
+  - name: "BLOG Gen Article"
+    enabled: true
+    api:
+      enabled: true
+      url: "http://localhost:8089/api/admin/generate-article"
+      method: "POST"
+      headers:
+        Content-Type: "application/json"
+      body: "{}"
+      expected_status: 200
+      timeout_seconds: 60
+  - name: "TIKTOK Get Users"
+    enabled: true
+    api:
+      enabled: true
+      url: "http://localhost:3030/users"
+      method: "GET"
+      headers:
+        Content-Type: "application/json"
+      expected_status: 200
+      timeout_seconds: 60
