@@ -65,7 +65,7 @@ clients:
       api:
         - name: "BLOG Gen Article"
           enabled: true
-          url: "http://localhost:8089/api/admin/generate-article"
+          url: "http://localhost:8087/api/admin/generate-article"
           method: "POST"
           headers:
             Content-Type: "application/json"
