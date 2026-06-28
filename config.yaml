@@ -58,7 +58,7 @@ page_checks:
     #   expected_status: 200
     #   contains_text: ""
 clients:
-  timeout_seconds: 30
+  timeout_seconds: 300
   service:
     - name: "BLOG-AUTO"
       enabled: true
