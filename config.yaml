@@ -8,9 +8,9 @@ scheduler:
 docker:
   enabled: true
   containers:
-    - name: "nginx"
+    - name: "minio"
       alert_on_stopped: true
-    - name: "postgres"
+    - name: "postgres-db"
       alert_on_stopped: true
     - name: "redis"
       alert_on_stopped: true
