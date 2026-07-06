@@ -42,6 +42,7 @@ type telegramUpdate struct {
 
 type telegramMessage struct {
 	Text string       `json:"text"`
+	Date int64        `json:"date"`
 	Chat telegramChat `json:"chat"`
 }
 
@@ -116,6 +117,7 @@ func (n *Notifier) StartCommandListener(ctx context.Context, handlers map[string
 		return
 	}
 
+	startedAt := time.Now().Unix()
 	log.Printf("[telegram] command listener started")
 	offset := 0
 	for {
@@ -143,7 +145,7 @@ func (n *Notifier) StartCommandListener(ctx context.Context, handlers map[string
 						log.Printf("[telegram] update handler panic recovered: %v\n%s", r, debug.Stack())
 					}
 				}()
-				n.handleUpdate(ctx, upd, handlers)
+				n.handleUpdate(ctx, upd, handlers, startedAt)
 			}()
 		}
 	}
@@ -200,8 +202,13 @@ func (n *Notifier) sendWithModeToChat(chatID, text, parseMode string) error {
 	return nil
 }
 
-func (n *Notifier) handleUpdate(ctx context.Context, upd telegramUpdate, handlers map[string]CommandHandler) {
+func (n *Notifier) handleUpdate(ctx context.Context, upd telegramUpdate, handlers map[string]CommandHandler, startedAt int64) {
 	if upd.Message == nil {
+		return
+	}
+
+	// Ignore stale messages sent before this process started to avoid command replay on restart.
+	if upd.Message.Date > 0 && upd.Message.Date < startedAt {
 		return
 	}
 
