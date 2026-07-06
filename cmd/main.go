@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -174,7 +175,7 @@ func startTelegramBotCommands(notifier *telegrampkg.Notifier, statistic *service
 			execCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 			defer cancel()
 
-			output, err := executeShellCommand(execCtx, command)
+			output, err := executeShellCommand(execCtx, command, dockerChecker)
 			if err != nil {
 				if strings.TrimSpace(output) == "" {
 					return "", err
@@ -201,10 +202,28 @@ func triggerApiClient(ctx context.Context, c *client.ApiClient, input string) (s
 	return *c.Cfg.Name + " triggered successfully\nHTTP status: " + strconv.Itoa(status) + "\nResponse:\n" + detail, nil
 }
 
-func executeShellCommand(ctx context.Context, command string) (string, error) {
+func executeShellCommand(ctx context.Context, command string, dockerChecker *docker.Checker) (string, error) {
 	parts := parseExecCommandParts(command)
 	if len(parts) == 0 {
 		return "", fmt.Errorf("empty command")
+	}
+
+	if parts[0] == "history" {
+		return readShellHistory(parts[1:])
+	}
+
+	if parts[0] == "docker" {
+		if _, err := exec.LookPath("docker"); err != nil {
+			return executeDockerFallback(ctx, parts[1:], dockerChecker)
+		}
+	}
+
+	if parts[0] == "systemctl" {
+		return "", fmt.Errorf("systemctl is not available in this container runtime; use /exec docker restart <container_name> or run admin-svc on VPS host")
+	}
+
+	if _, err := exec.LookPath(parts[0]); err != nil {
+		return "", fmt.Errorf("command %q is allowlisted but not installed in admin-svc runtime", parts[0])
 	}
 
 	cmd := exec.CommandContext(ctx, parts[0], parts[1:]...)
@@ -217,6 +236,106 @@ func executeShellCommand(ctx context.Context, command string) (string, error) {
 	}
 
 	return out, err
+}
+
+func executeDockerFallback(ctx context.Context, args []string, dockerChecker *docker.Checker) (string, error) {
+	if dockerChecker == nil {
+		return "", fmt.Errorf("docker CLI is unavailable and docker integration is disabled")
+	}
+
+	if len(args) == 0 || args[0] == "ps" {
+		statuses, err := dockerChecker.ListAll(ctx)
+		if err != nil {
+			return "", err
+		}
+		if len(statuses) == 0 {
+			return "No containers found", nil
+		}
+
+		var b strings.Builder
+		b.WriteString("NAME\tSTATE\tRUNNING")
+		for _, s := range statuses {
+			b.WriteString("\n")
+			b.WriteString(s.Name)
+			b.WriteString("\t")
+			b.WriteString(s.State)
+			b.WriteString("\t")
+			if s.Running {
+				b.WriteString("yes")
+			} else {
+				b.WriteString("no")
+			}
+		}
+		return b.String(), nil
+	}
+
+	if args[0] == "restart" {
+		if len(args) < 2 {
+			return "", fmt.Errorf("usage: /exec docker restart <container_name>")
+		}
+		if err := dockerChecker.Restart(ctx, args[1]); err != nil {
+			return "", err
+		}
+		return "Container restarted: " + args[1], nil
+	}
+
+	return "", fmt.Errorf("docker CLI not found; supported fallback commands: docker ps, docker restart <container_name>")
+}
+
+func readShellHistory(args []string) (string, error) {
+	limit := 50
+	if len(args) > 0 {
+		n, err := strconv.Atoi(args[0])
+		if err != nil || n <= 0 {
+			return "", fmt.Errorf("history accepts one optional positive number, e.g. /exec history 20")
+		}
+		limit = n
+	}
+
+	var candidates []string
+	if histFile := strings.TrimSpace(os.Getenv("HISTFILE")); histFile != "" {
+		candidates = append(candidates, histFile)
+	}
+
+	if homeDir, err := os.UserHomeDir(); err == nil && homeDir != "" {
+		candidates = append(candidates,
+			filepath.Join(homeDir, ".bash_history"),
+			filepath.Join(homeDir, ".zsh_history"),
+			filepath.Join(homeDir, ".ash_history"),
+		)
+	}
+
+	candidates = append(candidates, "/root/.bash_history")
+
+	var lines []string
+	for _, path := range candidates {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+
+		rawLines := strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
+		for _, line := range rawLines {
+			line = strings.TrimSpace(line)
+			if line != "" {
+				lines = append(lines, line)
+			}
+		}
+
+		if len(lines) > 0 {
+			break
+		}
+	}
+
+	if len(lines) == 0 {
+		return "No history entries found", nil
+	}
+
+	if limit > len(lines) {
+		limit = len(lines)
+	}
+
+	return strings.Join(lines[len(lines)-limit:], "\n"), nil
 }
 
 func validateExecCommand(command string, allowed map[string]struct{}) error {

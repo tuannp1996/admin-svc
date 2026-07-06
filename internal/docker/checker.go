@@ -18,6 +18,12 @@ type CheckResult struct {
 	Error         error
 }
 
+type ContainerStatus struct {
+	Name    string
+	State   string
+	Running bool
+}
+
 type Checker struct {
 	httpClient *http.Client
 	baseURL    string
@@ -122,6 +128,54 @@ func (c *Checker) Restart(ctx context.Context, containerName string) error {
 	}
 
 	return fmt.Errorf("restart %q failed with status %d", containerName, resp.StatusCode)
+}
+
+func (c *Checker) ListAll(ctx context.Context) ([]ContainerStatus, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/containers/json?all=true", nil)
+	if err != nil {
+		return nil, fmt.Errorf("build list request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("list containers: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		if len(body) > 0 {
+			return nil, fmt.Errorf("list containers failed with status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		}
+		return nil, fmt.Errorf("list containers failed with status %d", resp.StatusCode)
+	}
+
+	var containers []dockerContainer
+	if err := json.NewDecoder(resp.Body).Decode(&containers); err != nil {
+		return nil, fmt.Errorf("decode container list: %w", err)
+	}
+
+	statuses := make([]ContainerStatus, 0, len(containers))
+	for _, ctr := range containers {
+		if len(ctr.Names) == 0 {
+			statuses = append(statuses, ContainerStatus{
+				Name:    "<unknown>",
+				State:   ctr.State,
+				Running: ctr.State == "running",
+			})
+			continue
+		}
+
+		for _, name := range ctr.Names {
+			statuses = append(statuses, ContainerStatus{
+				Name:    strings.TrimPrefix(name, "/"),
+				State:   ctr.State,
+				Running: ctr.State == "running",
+			})
+		}
+	}
+
+	return statuses, nil
 }
 
 func (c *Checker) Close() {}

@@ -15,7 +15,16 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
 # --- Runtime stage ---
 FROM alpine:3.20
 
-RUN apk add --no-cache ca-certificates tzdata
+RUN apk add --no-cache \
+    ca-certificates \
+    tzdata \
+    curl \
+    docker-cli \
+    nodejs \
+    npm \
+    bash
+
+RUN npm install -g pm2
 
 WORKDIR /app
 
