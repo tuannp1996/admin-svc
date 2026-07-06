@@ -31,9 +31,5 @@ WORKDIR /app
 COPY --from=builder /admin-svc .
 COPY config.yaml .
 
-# Run as non-root
-RUN addgroup -S appgroup && adduser -S appuser -G appgroup
-USER appuser
-
 ENTRYPOINT ["/app/admin-svc"]
 CMD ["-config", "/app/config.yaml"]
