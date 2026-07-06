@@ -6,6 +6,7 @@ import (
 	"log"
 	"os/exec"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -48,6 +49,12 @@ func New(
 
 // Start blocks, running checks every interval
 func (s *Statistics) Start() {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[scheduler] panic recovered: %v\n%s", r, debug.Stack())
+		}
+	}()
+
 	interval := time.Duration(s.cfg.Scheduler.IntervalSeconds) * time.Second
 	log.Printf("[scheduler] starting, interval=%s", interval)
 
@@ -68,38 +75,47 @@ func (s *Statistics) runAll() {
 
 	if s.cfg.Docker.Enabled && s.docker != nil {
 		wg.Add(1)
-		go func() {
+		go s.runSafely("docker-checks", func() {
 			defer wg.Done()
 			s.runDockerChecks()
-		}()
+		})
 	}
 
 	if s.cfg.HealthChecks.Enabled {
 		wg.Add(1)
-		go func() {
+		go s.runSafely("health-checks", func() {
 			defer wg.Done()
 			s.runHealthChecks()
-		}()
+		})
 	}
 
 	if s.cfg.CurlChecks.Enabled {
 		wg.Add(1)
-		go func() {
+		go s.runSafely("curl-checks", func() {
 			defer wg.Done()
 			s.runCurlChecks()
-		}()
+		})
 	}
 
 	if s.cfg.PageChecks.Enabled {
 		wg.Add(1)
-		go func() {
+		go s.runSafely("page-checks", func() {
 			defer wg.Done()
 			s.runPageChecks()
-		}()
+		})
 	}
 
 	wg.Wait()
 	log.Printf("[Statistic] checks complete")
+}
+
+func (s *Statistics) runSafely(name string, fn func()) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[scheduler] %s panic recovered: %v\n%s", name, r, debug.Stack())
+		}
+	}()
+	fn()
 }
 
 // StatusSummary returns a compact service status string for bot commands.

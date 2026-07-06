@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
@@ -104,6 +105,12 @@ func (n *Notifier) SendPlain(text string) error {
 }
 
 func (n *Notifier) StartCommandListener(ctx context.Context, handlers map[string]CommandHandler) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[telegram] command listener panic recovered: %v\n%s", r, debug.Stack())
+		}
+	}()
+
 	if n.botToken == "" || n.chatID == "" {
 		log.Printf("[telegram] command listener disabled: token/chat_id missing")
 		return
@@ -130,7 +137,14 @@ func (n *Notifier) StartCommandListener(ctx context.Context, handlers map[string
 			if upd.UpdateID >= offset {
 				offset = upd.UpdateID + 1
 			}
-			n.handleUpdate(ctx, upd, handlers)
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Printf("[telegram] update handler panic recovered: %v\n%s", r, debug.Stack())
+					}
+				}()
+				n.handleUpdate(ctx, upd, handlers)
+			}()
 		}
 	}
 }

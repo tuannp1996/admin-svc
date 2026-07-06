@@ -2,8 +2,7 @@ version: "3.9"
 
 services:
   admin-svc:
-    image: ${DOCKER_IMAGE:-admin-svc:local}
-    build: .
+    image: ghcr.io/tuannp1996/admin-svc:latest
     container_name: admin-svc
     restart: unless-stopped
     volumes:
