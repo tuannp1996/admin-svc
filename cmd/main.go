@@ -107,6 +107,11 @@ func startTelegramBotCommands(notifier *telegrampkg.Notifier, statistic *service
 		"pm2":       {},
 		"systemctl": {},
 		"curl":      {},
+		"history":   {},
+		"ls":        {},
+		"cat":       {},
+		"tail":      {},
+		"head":      {},
 	}
 
 	go notifier.StartCommandListener(commandCtx, map[string]telegrampkg.CommandHandler{
@@ -157,9 +162,9 @@ func startTelegramBotCommands(notifier *telegrampkg.Notifier, statistic *service
 			return triggerApiClient(ctx, tikClient, "")
 		},
 		"/exec": func(ctx context.Context, input string) (string, error) {
-			command := strings.TrimSpace(input)
+			command := normalizeExecInput(input)
 			if command == "" {
-				return "Usage: /exec <command>\nAllowed: docker, pm2, systemctl, curl", nil
+				return "Usage: /exec <command>\nAllowed: docker, pm2, systemctl, curl, history, ls, cat, tail, head", nil
 			}
 
 			if err := validateExecCommand(command, allowedExecCommands); err != nil {
@@ -197,7 +202,7 @@ func triggerApiClient(ctx context.Context, c *client.ApiClient, input string) (s
 }
 
 func executeShellCommand(ctx context.Context, command string) (string, error) {
-	parts := strings.Fields(command)
+	parts := parseExecCommandParts(command)
 	if len(parts) == 0 {
 		return "", fmt.Errorf("empty command")
 	}
@@ -215,7 +220,7 @@ func executeShellCommand(ctx context.Context, command string) (string, error) {
 }
 
 func validateExecCommand(command string, allowed map[string]struct{}) error {
-	parts := strings.Fields(command)
+	parts := parseExecCommandParts(command)
 	if len(parts) == 0 {
 		return fmt.Errorf("empty command")
 	}
@@ -226,4 +231,30 @@ func validateExecCommand(command string, allowed map[string]struct{}) error {
 	}
 
 	return nil
+}
+
+func parseExecCommandParts(command string) []string {
+	command = strings.TrimSpace(command)
+	if len(command) >= 2 {
+		if (command[0] == '"' && command[len(command)-1] == '"') ||
+			(command[0] == '\'' && command[len(command)-1] == '\'') {
+			command = strings.TrimSpace(command[1 : len(command)-1])
+		}
+	}
+	return strings.Fields(command)
+}
+
+func normalizeExecInput(input string) string {
+	command := strings.TrimSpace(input)
+	if len(command) < 2 {
+		return command
+	}
+
+	first := command[0]
+	last := command[len(command)-1]
+	if (first == '"' && last == '"') || (first == '\'' && last == '\'') {
+		return strings.TrimSpace(command[1 : len(command)-1])
+	}
+
+	return command
 }
