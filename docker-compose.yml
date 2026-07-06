@@ -8,7 +8,7 @@ services:
     restart: unless-stopped
     volumes:
       # Mount Docker socket to inspect other containers
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/run/docker.sock:/var/run/docker.sock
       # Mount config (so you can edit without rebuilding)
       - ./config.yaml:/app/config.yaml:ro
       # Mount .env so the app can load secrets at startup

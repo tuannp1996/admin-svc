@@ -18,22 +18,9 @@ Alerts are **deduplicated**: you get one alert when something breaks, and one re
 The bot now supports runtime commands from the configured `chat_id`:
 
 - `/status`: returns current monitor summary and number of active alerts.
-- `/restart`: restarts `admin-svc` process (works with Docker `restart: unless-stopped`).
+- `/restart <container_name>`: restarts a Docker container by name via Docker socket.
 - `/blog_gen <topic>` or `/gen_blog <topic>`: triggers external `auto_blog` service via HTTP. When a topic is provided, the request body is `{"topic":"<topic>"}`.
 
-Configure `/blog_gen` and `/gen_blog` target in `config.yaml`:
-
-```yaml
-blog_gen:
-  enabled: true
-  url: "http://localhost:8090/auto_blog/generate"
-  method: "POST"
-  headers:
-    Content-Type: "application/json"
-  body: "{}"
-  expected_status: 200
-  timeout_seconds: 60
-```
 
 ## Quick start
 
