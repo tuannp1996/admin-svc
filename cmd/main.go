@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -50,7 +51,7 @@ func main() {
 
 	statistics := service.New(cfg, notifier, dockerChecker)
 
-	_, cancelCommands := startTelegramBotCommands(notifier, statistics, services)
+	_, cancelCommands := startTelegramBotCommands(notifier, statistics, services, dockerChecker)
 	defer cancelCommands()
 
 	checks := collectEnabledChecks(cfg)
@@ -96,7 +97,7 @@ func collectEnabledChecks(cfg *config.Config) []string {
 	return list
 }
 
-func startTelegramBotCommands(notifier *telegrampkg.Notifier, statistic *service.Statistics, services *[]client.Service) (context.Context, context.CancelFunc) {
+func startTelegramBotCommands(notifier *telegrampkg.Notifier, statistic *service.Statistics, services *[]client.Service, dockerChecker *docker.Checker) (context.Context, context.CancelFunc) {
 	commandCtx, cancelCommands := context.WithCancel(context.Background())
 
 	go notifier.StartCommandListener(commandCtx, map[string]telegrampkg.CommandHandler{
@@ -104,11 +105,23 @@ func startTelegramBotCommands(notifier *telegrampkg.Notifier, statistic *service
 			return statistic.StatusSummary(), nil
 		},
 		"/restart": func(ctx context.Context, input string) (string, error) {
-			go func() {
-				time.Sleep(2 * time.Second)
-				os.Exit(0)
-			}()
-			return "Restarting admin-svc...", nil
+			if dockerChecker == nil {
+				return "Docker integration is disabled", nil
+			}
+
+			containerName := strings.TrimSpace(input)
+			if containerName == "" {
+				return "Usage: /restart <container_name>", nil
+			}
+
+			restartCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+			defer cancel()
+
+			if err := dockerChecker.Restart(restartCtx, containerName); err != nil {
+				return "", err
+			}
+
+			return "Container restarted: " + containerName, nil
 		},
 		"/blog_gen": func(ctx context.Context, input string) (string, error) {
 			var blogClient *client.ApiClient

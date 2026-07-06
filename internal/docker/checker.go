@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -92,6 +93,35 @@ func (c *Checker) Check(containerNames []string) []CheckResult {
 		}
 	}
 	return results
+}
+
+func (c *Checker) Restart(ctx context.Context, containerName string) error {
+	containerName = strings.TrimSpace(containerName)
+	if containerName == "" {
+		return fmt.Errorf("container name is required")
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/containers/"+containerName+"/restart?t=10", nil)
+	if err != nil {
+		return fmt.Errorf("build restart request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("restart %q: %w", containerName, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return nil
+	}
+
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+	if len(body) > 0 {
+		return fmt.Errorf("restart %q failed with status %d: %s", containerName, resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	return fmt.Errorf("restart %q failed with status %d", containerName, resp.StatusCode)
 }
 
 func (c *Checker) Close() {}
