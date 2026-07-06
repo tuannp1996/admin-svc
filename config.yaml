@@ -53,6 +53,8 @@ page_checks:
       url: "https://financi.vn"
       expected_status: 200
       contains_text: ""   # optional: check page contains this string
+      recovery_command: "pm2 start financi-web"
+      recovery_timeout_seconds: 120
     # - name: "Dashboard"
     #   url: "https://financi.vn/dashboard"
     #   expected_status: 200

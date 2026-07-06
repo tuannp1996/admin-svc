@@ -9,7 +9,7 @@ Lightweight Go service that monitors your server and sends Telegram alerts.
 | 🐳 **Docker** | Checks if named containers are running |
 | 🏥 **HTTP Health** | GET request → validates status code |
 | 🔁 **API/Curl** | Any method, custom headers & body → validates status |
-| 🌐 **Page** | GET page → validates status + optional text presence |
+| 🌐 **Page** | GET page → validates status + optional text presence + optional async recovery command |
 
 Alerts are **deduplicated**: you get one alert when something breaks, and one recovery message when it comes back. No spam.
 
@@ -48,7 +48,18 @@ health_checks:
     - name: "My API"
       url: "http://localhost:8080/health"
       expected_status: 200
+
+page_checks:
+  enabled: true
+  pages:
+    - name: "Landing Page"
+      url: "https://financi.vn"
+      expected_status: 200
+      recovery_command: "pm2 start financi-web"
+      recovery_timeout_seconds: 120
 ```
+
+When a page check first transitions from healthy to failed, admin-svc executes recovery_command asynchronously one time for that outage (for example after HTTP 502). It runs again only after the check recovers and fails later.
 
 ### 2. Run with Docker Compose
 

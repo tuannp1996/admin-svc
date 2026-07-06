@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strconv"
 	"strings"
@@ -100,6 +102,13 @@ func collectEnabledChecks(cfg *config.Config) []string {
 func startTelegramBotCommands(notifier *telegrampkg.Notifier, statistic *service.Statistics, services *[]client.Service, dockerChecker *docker.Checker) (context.Context, context.CancelFunc) {
 	commandCtx, cancelCommands := context.WithCancel(context.Background())
 
+	allowedExecCommands := map[string]struct{}{
+		"docker":    {},
+		"pm2":       {},
+		"systemctl": {},
+		"curl":      {},
+	}
+
 	go notifier.StartCommandListener(commandCtx, map[string]telegrampkg.CommandHandler{
 		"/status": func(ctx context.Context, input string) (string, error) {
 			return statistic.StatusSummary(), nil
@@ -147,6 +156,33 @@ func startTelegramBotCommands(notifier *telegrampkg.Notifier, statistic *service
 			}
 			return triggerApiClient(ctx, tikClient, "")
 		},
+		"/exec": func(ctx context.Context, input string) (string, error) {
+			command := strings.TrimSpace(input)
+			if command == "" {
+				return "Usage: /exec <command>\nAllowed: docker, pm2, systemctl, curl", nil
+			}
+
+			if err := validateExecCommand(command, allowedExecCommands); err != nil {
+				return "", err
+			}
+
+			execCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			defer cancel()
+
+			output, err := executeShellCommand(execCtx, command)
+			if err != nil {
+				if strings.TrimSpace(output) == "" {
+					return "", err
+				}
+				return "Command failed:\n" + output, err
+			}
+
+			if strings.TrimSpace(output) == "" {
+				return "Command completed (no output)", nil
+			}
+
+			return "Output:\n" + output, nil
+		},
 	})
 
 	return commandCtx, cancelCommands
@@ -158,4 +194,36 @@ func triggerApiClient(ctx context.Context, c *client.ApiClient, input string) (s
 		return "", err
 	}
 	return *c.Cfg.Name + " triggered successfully\nHTTP status: " + strconv.Itoa(status) + "\nResponse:\n" + detail, nil
+}
+
+func executeShellCommand(ctx context.Context, command string) (string, error) {
+	parts := strings.Fields(command)
+	if len(parts) == 0 {
+		return "", fmt.Errorf("empty command")
+	}
+
+	cmd := exec.CommandContext(ctx, parts[0], parts[1:]...)
+	output, err := cmd.CombinedOutput()
+	out := strings.TrimSpace(string(output))
+
+	const maxLen = 3000
+	if len(out) > maxLen {
+		out = out[:maxLen] + "\n...(truncated)"
+	}
+
+	return out, err
+}
+
+func validateExecCommand(command string, allowed map[string]struct{}) error {
+	parts := strings.Fields(command)
+	if len(parts) == 0 {
+		return fmt.Errorf("empty command")
+	}
+
+	baseCommand := parts[0]
+	if _, ok := allowed[baseCommand]; !ok {
+		return fmt.Errorf("command %q is not allowed", baseCommand)
+	}
+
+	return nil
 }

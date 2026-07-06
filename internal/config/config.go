@@ -75,6 +75,8 @@ type PageCheck struct {
 	URL            string `yaml:"url"`
 	ExpectedStatus int    `yaml:"expected_status"`
 	ContainsText   string `yaml:"contains_text"`
+	RecoveryCommand string `yaml:"recovery_command"`
+	RecoveryTimeoutSeconds int `yaml:"recovery_timeout_seconds"`
 }
 
 type ClientConfig struct {

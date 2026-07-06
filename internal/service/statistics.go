@@ -1,8 +1,12 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"log"
+	"os/exec"
+	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -227,17 +231,62 @@ func (s *Statistics) runPageChecks() {
 		})
 		key := "page:" + pg.Name
 		if !result.OK {
-			s.handleAlert(key, "Page Availability", result.Name, result.Detail)
+			newAlert := s.handleAlert(key, "Page Availability", result.Name, result.Detail)
+			if newAlert {
+				s.runPageRecoveryAsync(pg)
+			}
 		} else {
 			s.handleRecovery(key, "Page Availability", result.Name)
 		}
 	}
 }
 
+func (s *Statistics) runPageRecoveryAsync(pg config.PageCheck) {
+	command := strings.TrimSpace(pg.RecoveryCommand)
+	if command == "" {
+		return
+	}
+
+	timeoutSeconds := pg.RecoveryTimeoutSeconds
+	if timeoutSeconds <= 0 {
+		timeoutSeconds = 60
+	}
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSeconds)*time.Second)
+		defer cancel()
+
+		shell := "sh"
+		shellArg := "-c"
+		if runtime.GOOS == "windows" {
+			shell = "cmd"
+			shellArg = "/C"
+		}
+
+		cmd := exec.CommandContext(ctx, shell, shellArg, command)
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			if len(output) > 0 {
+				log.Printf("[page-recovery] %s failed: %v | output: %s", pg.Name, err, strings.TrimSpace(string(output)))
+				return
+			}
+			log.Printf("[page-recovery] %s failed: %v", pg.Name, err)
+			return
+		}
+
+		if len(output) > 0 {
+			log.Printf("[page-recovery] %s command succeeded: %s", pg.Name, strings.TrimSpace(string(output)))
+			return
+		}
+
+		log.Printf("[page-recovery] %s command succeeded", pg.Name)
+	}()
+}
+
 // --- Alert deduplication ---
 
 // handleAlert sends an alert only if this check was previously OK (or first time)
-func (s *Statistics) handleAlert(key, checkType, name, detail string) {
+func (s *Statistics) handleAlert(key, checkType, name, detail string) bool {
 	log.Printf("[alert] %s | %s | %s", checkType, name, detail)
 	s.mu.Lock()
 	wasAlerting := s.alertState[key]
@@ -248,7 +297,10 @@ func (s *Statistics) handleAlert(key, checkType, name, detail string) {
 		if err := s.notifier.SendAlert(checkType, name, detail); err != nil {
 			log.Printf("[telegram] send alert error: %v", err)
 		}
+		return true
 	}
+
+	return false
 }
 
 // handleRecovery sends a recovery message only if check was previously alerting
