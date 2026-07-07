@@ -159,7 +159,7 @@ func (s *Statistics) StatusSummary() string {
 	healthDetails := ""
 	if s.cfg.HealthChecks.Enabled {
 		for _, ep := range s.cfg.HealthChecks.Endpoints {
-			healthDetails += fmt.Sprintf("\n  - %s: %s : status: OK!", ep.Name, ep.URL)
+			healthDetails += fmt.Sprintf("\n  - %s : OK!", ep.Name)
 		}
 	}
 

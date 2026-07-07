@@ -26,6 +26,8 @@ func main() {
 	envPath := flag.String("env", ".env", "path to .env file")
 	flag.Parse()
 
+	setTimeZoneUTCPlus7()
+
 	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
 
 	// Load .env first so ${VAR} in config.yaml get expanded
@@ -73,6 +75,19 @@ func main() {
 	if dockerChecker != nil {
 		dockerChecker.Close()
 	}
+}
+
+func setTimeZoneUTCPlus7() {
+	// Prefer IANA location for proper timezone metadata, fallback to fixed UTC+7 offset.
+	loc, err := time.LoadLocation("Asia/Ho_Chi_Minh")
+	if err != nil {
+		time.Local = time.FixedZone("UTC+7", 7*60*60)
+		log.Printf("[main] timezone set to UTC+7 (fixed): %v", err)
+		return
+	}
+
+	time.Local = loc
+	log.Printf("[main] timezone set to %s", loc)
 }
 
 func collectEnabledChecks(cfg *config.Config) []string {
