@@ -19,6 +19,7 @@ import (
 	"admin-svc/internal/docker"
 	telegrampkg "admin-svc/internal/infrastructure/telegram"
 	"admin-svc/internal/service"
+	"github.com/redis/go-redis/v9"
 )
 
 func main() {
@@ -54,9 +55,9 @@ func main() {
 		}
 	}
 
-	statistics := service.New(cfg, notifier, dockerChecker)
+	statistics := service.New(cfg, notifier, dockerChecker, services)
 
-	_, cancelCommands := startTelegramBotCommands(notifier, statistics, services, dockerChecker)
+	_, cancelCommands := startTelegramBotCommands(cfg, notifier, statistics, services, dockerChecker)
 	defer cancelCommands()
 
 	checks := collectEnabledChecks(cfg)
@@ -115,7 +116,7 @@ func collectEnabledChecks(cfg *config.Config) []string {
 	return list
 }
 
-func startTelegramBotCommands(notifier *telegrampkg.Notifier, statistic *service.Statistics, services *[]client.Service, dockerChecker *docker.Checker) (context.Context, context.CancelFunc) {
+func startTelegramBotCommands(cfg *config.Config, notifier *telegrampkg.Notifier, statistic *service.Statistics, services *[]client.Service, dockerChecker *docker.Checker) (context.Context, context.CancelFunc) {
 	commandCtx, cancelCommands := context.WithCancel(context.Background())
 
 	allowedExecCommands := map[string]struct{}{
@@ -165,6 +166,36 @@ func startTelegramBotCommands(notifier *telegrampkg.Notifier, statistic *service
 			}
 			return triggerApiClient(ctx, blogClient, input)
 		},
+		"/blog_topic": func(ctx context.Context, input string) (string, error) {
+			topics := parseTopicsInput(input)
+			if len(topics) == 0 {
+				return "Usage: /blog_topic <topic1> <topic2> ... or /blog_topic \"topic with spaces\" \"another topic\"", nil
+			}
+
+			addr, password, db, listKey, err := resolveBlogTopicRedisConfig(cfg)
+			if err != nil {
+				return "", err
+			}
+
+			redisClient := redis.NewClient(&redis.Options{
+				Addr:     addr,
+				Password: password,
+				DB:       db,
+			})
+			defer redisClient.Close()
+
+			values := make([]interface{}, 0, len(topics))
+			for _, topic := range topics {
+				values = append(values, topic)
+			}
+
+			added, err := redisClient.RPush(ctx, listKey, values...).Result()
+			if err != nil {
+				return "", fmt.Errorf("redis rpush %q: %w", listKey, err)
+			}
+
+			return fmt.Sprintf("Added %d topic(s) to redis list %s. List length now: %d", len(topics), listKey, added), nil
+		},
 		"/tik_users": func(ctx context.Context, input string) (string, error) {
 			var tikClient *client.ApiClient
 			for _, s := range *services {
@@ -207,6 +238,132 @@ func startTelegramBotCommands(notifier *telegrampkg.Notifier, statistic *service
 	})
 
 	return commandCtx, cancelCommands
+}
+
+func parseTopicsInput(input string) []string {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return nil
+	}
+
+	tokens := tokenizeQuoted(input)
+	if len(tokens) == 0 {
+		return nil
+	}
+
+	topics := make([]string, 0, len(tokens))
+	for _, token := range tokens {
+		topic := strings.TrimSpace(token)
+		if topic != "" {
+			topics = append(topics, topic)
+		}
+	}
+
+	return topics
+}
+
+func tokenizeQuoted(s string) []string {
+	var tokens []string
+	var current strings.Builder
+
+	inQuote := false
+	quoteChar := byte(0)
+	escaped := false
+
+	flush := func() {
+		if current.Len() == 0 {
+			return
+		}
+		tokens = append(tokens, current.String())
+		current.Reset()
+	}
+
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+
+		if escaped {
+			current.WriteByte(ch)
+			escaped = false
+			continue
+		}
+
+		if ch == '\\' {
+			escaped = true
+			continue
+		}
+
+		if inQuote {
+			if ch == quoteChar {
+				inQuote = false
+				quoteChar = 0
+				continue
+			}
+			current.WriteByte(ch)
+			continue
+		}
+
+		if ch == '"' || ch == '\'' {
+			inQuote = true
+			quoteChar = ch
+			continue
+		}
+
+		if ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' {
+			flush()
+			continue
+		}
+
+		current.WriteByte(ch)
+	}
+
+	flush()
+	return tokens
+}
+
+func resolveBlogTopicRedisConfig(cfg *config.Config) (addr, password string, db int, listKey string, err error) {
+	if cfg == nil {
+		return "", "", 0, "", fmt.Errorf("config is nil")
+	}
+
+	for _, job := range cfg.Scheduler.Jobs {
+		if normalizeKeyMain(job.TopicSource) != "redis" {
+			continue
+		}
+
+		apiName := normalizeKeyMain(job.API)
+		jobName := normalizeKeyMain(job.Name)
+		if apiName == "bloggenarticle" || jobName == "bloggenredis" || strings.Contains(jobName, "blog") {
+			addr = strings.TrimSpace(job.RedisAddr)
+			if addr == "" {
+				addr = "localhost:6379"
+			}
+			password = job.RedisPassword
+			db = job.RedisDB
+			listKey = strings.TrimSpace(job.RedisTopicList)
+			if listKey == "" {
+				return "", "", 0, "", fmt.Errorf("redis_topic_list is empty in scheduler redis job")
+			}
+			return addr, password, db, listKey, nil
+		}
+	}
+
+	return "", "", 0, "", fmt.Errorf("no scheduler redis job found for blog topics; configure scheduler.jobs with topic_source=redis")
+}
+
+func normalizeKeyMain(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	if s == "" {
+		return ""
+	}
+
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 func triggerApiClient(ctx context.Context, c *client.ApiClient, input string) (string, error) {

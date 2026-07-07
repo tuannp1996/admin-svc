@@ -4,17 +4,22 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"os/exec"
 	"runtime"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"admin-svc/internal/client"
 	"admin-svc/internal/config"
 	"admin-svc/internal/docker"
 	"admin-svc/internal/health"
 	"admin-svc/internal/usecase/port"
+	"github.com/redis/go-redis/v9"
+	"github.com/robfig/cron/v3"
 )
 
 // Statistics runs all checks on a fixed interval
@@ -25,16 +30,20 @@ type Statistics struct {
 	health   *health.Checker
 	curl     *health.Checker
 	page     *health.Checker
+	services *[]client.Service
 
 	// Track which checks are currently in alert state to avoid re-sending
 	alertState map[string]bool
 	mu         sync.Mutex
+	topicIndex map[string]int
+	redisConns map[string]*redis.Client
 }
 
 func New(
 	cfg *config.Config,
 	notifier port.Notifier,
 	dockerChecker *docker.Checker,
+	services *[]client.Service,
 ) *Statistics {
 	return &Statistics{
 		cfg:        cfg,
@@ -43,7 +52,10 @@ func New(
 		health:     health.New(cfg.HealthChecks.TimeoutSeconds),
 		curl:       health.New(cfg.CurlChecks.TimeoutSeconds),
 		page:       health.New(cfg.PageChecks.TimeoutSeconds),
+		services:   services,
 		alertState: make(map[string]bool),
+		topicIndex: make(map[string]int),
+		redisConns: make(map[string]*redis.Client),
 	}
 }
 
@@ -57,6 +69,7 @@ func (s *Statistics) Start() {
 
 	interval := time.Duration(s.cfg.Scheduler.IntervalSeconds) * time.Second
 	log.Printf("[scheduler] starting, interval=%s", interval)
+	s.startCronJobs()
 
 	// Run once immediately on start
 	s.runAll()
@@ -66,6 +79,289 @@ func (s *Statistics) Start() {
 	for range ticker.C {
 		s.runAll()
 	}
+}
+
+func (s *Statistics) startCronJobs() {
+	if len(s.cfg.Scheduler.Jobs) == 0 {
+		return
+	}
+
+	parser := cron.NewParser(
+		cron.SecondOptional |
+			cron.Minute |
+			cron.Hour |
+			cron.Dom |
+			cron.Month |
+			cron.Dow |
+			cron.Descriptor,
+	)
+
+	c := cron.New(
+		cron.WithParser(parser),
+		cron.WithLocation(time.Local),
+	)
+
+	configured := 0
+	for _, job := range s.cfg.Scheduler.Jobs {
+		if !job.Enabled {
+			continue
+		}
+
+		name := strings.TrimSpace(job.Name)
+		if name == "" {
+			log.Printf("[cron] skip job with empty name")
+			continue
+		}
+
+		spec := strings.TrimSpace(job.Cron)
+		if spec == "" {
+			log.Printf("[cron] skip job=%s, empty cron expression", name)
+			continue
+		}
+
+		apiClient := s.findAPIClient(job.Service, job.API)
+		if apiClient == nil {
+			log.Printf("[cron] skip job=%s, api not found (service=%q api=%q)", name, job.Service, job.API)
+			continue
+		}
+
+		jobCopy := job
+		if _, err := c.AddFunc(spec, func() {
+			s.runCronJob(jobCopy, apiClient)
+		}); err != nil {
+			log.Printf("[cron] invalid cron for job=%s spec=%q err=%v", name, spec, err)
+			continue
+		}
+
+		configured++
+		log.Printf("[cron] registered job=%s spec=%q", name, spec)
+	}
+
+	if configured == 0 {
+		return
+	}
+
+	c.Start()
+	log.Printf("[cron] started with %d job(s)", configured)
+}
+
+func (s *Statistics) runCronJob(job config.CronJobConfig, apiClient *client.ApiClient) {
+	name := strings.TrimSpace(job.Name)
+	if name == "" {
+		name = strings.TrimSpace(job.API)
+	}
+	if name == "" {
+		name = "unnamed"
+	}
+
+	key := "cron:" + name
+	timeoutSeconds := s.cfg.Clients.TimeoutSeconds
+	if timeoutSeconds <= 0 {
+		timeoutSeconds = 30
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSeconds)*time.Second)
+	defer cancel()
+
+	topic, err := s.resolveCronTopic(ctx, name, job)
+	if err != nil {
+		s.handleAlert(key, "Cron Job", name, "resolve topic failed: "+err.Error())
+		return
+	}
+
+	status, detail, err := apiClient.Trigger(ctx, topic)
+	if err != nil {
+		s.handleAlert(
+			key,
+			"Cron Job",
+			name,
+			"api="+safeAPIName(apiClient)+" topic="+truncateDetail(topic, 120)+" status="+strconv.Itoa(status)+" error="+err.Error()+" detail="+truncateDetail(detail, 600),
+		)
+		return
+	}
+
+	s.handleRecovery(key, "Cron Job", name)
+	log.Printf("[cron] success job=%s api=%s topic=%q status=%d", name, safeAPIName(apiClient), topic, status)
+}
+
+func (s *Statistics) resolveCronTopic(ctx context.Context, jobName string, job config.CronJobConfig) (string, error) {
+	source := normalizeKey(job.TopicSource)
+	if source == "" || source == "static" {
+		return strings.TrimSpace(job.Topic), nil
+	}
+
+	if source == "txt" || source == "text" || source == "file" {
+		topics, err := loadTopicsFromFile(job.TopicFile)
+		if err != nil {
+			return "", err
+		}
+		return s.nextTopicRoundRobin(jobName, topics), nil
+	}
+
+	if source == "redis" {
+		return s.popTopicFromRedis(ctx, job)
+	}
+
+	return "", fmt.Errorf("unsupported topic_source=%q", job.TopicSource)
+}
+
+func loadTopicsFromFile(path string) ([]string, error) {
+	filePath := strings.TrimSpace(path)
+	if filePath == "" {
+		return nil, fmt.Errorf("topic_file is empty")
+	}
+
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("read topic_file: %w", err)
+	}
+
+	var topics []string
+	for _, line := range splitLinesLocal(string(data)) {
+		t := strings.TrimSpace(line)
+		if t == "" || strings.HasPrefix(t, "#") {
+			continue
+		}
+		topics = append(topics, t)
+	}
+	if len(topics) == 0 {
+		return nil, fmt.Errorf("topic_file has no usable topics")
+	}
+
+	return topics, nil
+}
+
+func (s *Statistics) nextTopicRoundRobin(jobName string, topics []string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	idx := s.topicIndex[jobName]
+	topic := topics[idx%len(topics)]
+	s.topicIndex[jobName] = (idx + 1) % len(topics)
+	return topic
+}
+
+func (s *Statistics) popTopicFromRedis(ctx context.Context, job config.CronJobConfig) (string, error) {
+	addr := strings.TrimSpace(job.RedisAddr)
+	if addr == "" {
+		addr = "localhost:6379"
+	}
+
+	listKey := strings.TrimSpace(job.RedisTopicList)
+	if listKey == "" {
+		return "", fmt.Errorf("redis_topic_list is empty")
+	}
+
+	redisKey := addr + "|" + strconv.Itoa(job.RedisDB) + "|" + job.RedisPassword
+	client := s.getRedisClient(redisKey, addr, job.RedisPassword, job.RedisDB)
+
+	val, err := client.LPop(ctx, listKey).Result()
+	if err != nil {
+		if err == redis.Nil {
+			return "", fmt.Errorf("redis topic list is empty")
+		}
+		return "", fmt.Errorf("redis lpop %q: %w", listKey, err)
+	}
+
+	topic := strings.TrimSpace(val)
+	if topic == "" {
+		return "", fmt.Errorf("redis topic is empty")
+	}
+
+	return topic, nil
+}
+
+func (s *Statistics) getRedisClient(key, addr, password string, db int) *redis.Client {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if c, ok := s.redisConns[key]; ok {
+		return c
+	}
+
+	c := redis.NewClient(&redis.Options{
+		Addr:     addr,
+		Password: password,
+		DB:       db,
+	})
+	s.redisConns[key] = c
+	return c
+}
+
+func splitLinesLocal(s string) []string {
+	var lines []string
+	start := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\n' {
+			lines = append(lines, strings.TrimRight(s[start:i], "\r"))
+			start = i + 1
+		}
+	}
+	if start < len(s) {
+		lines = append(lines, s[start:])
+	}
+	return lines
+}
+
+func (s *Statistics) findAPIClient(serviceName, apiName string) *client.ApiClient {
+	if s.services == nil {
+		return nil
+	}
+
+	serviceKey := normalizeKey(serviceName)
+	apiKey := normalizeKey(apiName)
+	for _, srv := range *s.services {
+		if serviceKey != "" {
+			if srv.ServiceName == nil || normalizeKey(*srv.ServiceName) != serviceKey {
+				continue
+			}
+		}
+
+		for _, c := range srv.ApiClients {
+			if c == nil || c.Cfg.Name == nil {
+				continue
+			}
+			if apiKey != "" && normalizeKey(*c.Cfg.Name) == apiKey {
+				return c
+			}
+		}
+	}
+
+	return nil
+}
+
+func normalizeKey(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	if s == "" {
+		return ""
+	}
+
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+func safeAPIName(c *client.ApiClient) string {
+	if c != nil && c.Cfg.Name != nil {
+		return *c.Cfg.Name
+	}
+	return "unknown"
+}
+
+func truncateDetail(s string, max int) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "(empty)"
+	}
+	if max <= 0 || len(s) <= max {
+		return s
+	}
+	return s[:max] + "...(truncated)"
 }
 
 func (s *Statistics) runAll() {

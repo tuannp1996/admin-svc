@@ -20,6 +20,7 @@ The bot now supports runtime commands from the configured `chat_id`:
 - `/status`: returns current monitor summary and number of active alerts.
 - `/restart <container_name>`: restarts a Docker container by name via Docker socket.
 - `/blog_gen <topic>` or `/gen_blog <topic>`: triggers external `auto_blog` service via HTTP. When a topic is provided, the request body is `{"topic":"<topic>"}`.
+- `/blog_topic <topic1> <topic2> ...`: push one or multiple blog topics into the configured Redis topic list (for cron jobs with `topic_source: redis`).
 
 
 ## Quick start
@@ -35,6 +36,15 @@ telegram:
 
 scheduler:
   interval_seconds: 60
+  jobs:
+    - name: "blog_gen"
+      enabled: true
+      cron: "0 0 7 * * *"
+      service: "BLOG-AUTO"
+      api: "BLOG Gen Article"
+      topic_source: "txt"
+      topic_file: "./topics/blog_topics.txt"
+      topic: ""
 
 docker:
   enabled: true
@@ -60,6 +70,27 @@ page_checks:
 ```
 
 When a page check first transitions from healthy to failed, admin-svc executes recovery_command asynchronously one time for that outage (for example after HTTP 502). It runs again only after the check recovers and fails later.
+
+### Scheduler cron jobs
+
+You can run multiple named cron jobs that trigger configured API clients.
+
+- `name`: job label shown in logs/alerts.
+- `cron`: cron expression (supports both 5-field and 6-field with optional seconds).
+- `service`: service name from `clients.service[].name` (optional but recommended).
+- `api`: API name from `clients.service[].api[].name`.
+- `topic`: optional topic payload for API triggers that accept it.
+- `topic_source`: `static` (default), `txt`, or `redis`.
+- `topic_file`: topic file path when `topic_source: txt`.
+- `redis_addr`, `redis_password`, `redis_db`, `redis_topic_list`: redis options when `topic_source: redis`.
+
+If a cron job fails, admin-svc sends a deduplicated `Cron Job` alert to Telegram and sends recovery when it succeeds again.
+
+Topic behavior:
+
+- `static`: uses `topic` as-is each run.
+- `txt`: reads non-empty lines from `topic_file` and rotates topic round-robin each run.
+- `redis`: pops one topic from redis list (`LPOP redis_topic_list`) each run; empty list triggers cron alert.
 
 ### 2. Run with Docker Compose
 

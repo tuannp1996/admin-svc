@@ -25,6 +25,22 @@ type TelegramConfig struct {
 
 type SchedulerConfig struct {
 	IntervalSeconds int `yaml:"interval_seconds"`
+	Jobs            []CronJobConfig `yaml:"jobs"`
+}
+
+type CronJobConfig struct {
+	Enabled        bool   `yaml:"enabled"`
+	Name           string `yaml:"name"`
+	Cron           string `yaml:"cron"`
+	Service        string `yaml:"service"`
+	API            string `yaml:"api"`
+	Topic          string `yaml:"topic"`
+	TopicSource    string `yaml:"topic_source"`
+	TopicFile      string `yaml:"topic_file"`
+	RedisAddr      string `yaml:"redis_addr"`
+	RedisPassword  string `yaml:"redis_password"`
+	RedisDB        int    `yaml:"redis_db"`
+	RedisTopicList string `yaml:"redis_topic_list"`
 }
 
 type DockerConfig struct {

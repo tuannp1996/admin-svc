@@ -4,6 +4,31 @@ telegram:
 
 scheduler:
   interval_seconds: 150  # How often to run all checks
+  jobs:
+    - name: "blog_gen"
+      enabled: true
+      cron: "0 */4 * * * *"   # Every 4 hours at 00:00 (supports 5 or 6 fields)
+      service: "BLOG-AUTO"
+      api: "BLOG Gen Article"
+      topic_source: "txt"      # static | txt | redis
+      topic_file: "./topics/blog_topics.txt"
+      topic: ""                # used only when topic_source=static
+    - name: "tik_users"
+      enabled: false
+      cron: "0 0 20 * * *"   # Every day at 20:00
+      service: "TIKTOK-CONNECTOR"
+      api: "TIKTOK Get Users"
+      topic: ""
+    - name: "blog_gen_redis"
+      enabled: false
+      cron: "0 30 7 * * *"   # Every day at 07:30
+      service: "BLOG-AUTO"
+      api: "BLOG Gen Article"
+      topic_source: "redis"
+      redis_addr: "localhost:6379"
+      redis_password: ""
+      redis_db: 0
+      redis_topic_list: "blog:topics:queue"
 
 docker:
   enabled: true
