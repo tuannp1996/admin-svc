@@ -30,6 +30,7 @@ WORKDIR /app
 
 COPY --from=builder /admin-svc .
 COPY config.yaml .
+COPY topics ./topics
 
 ENTRYPOINT ["/app/admin-svc"]
 CMD ["-config", "/app/config.yaml"]

@@ -172,7 +172,7 @@ func startTelegramBotCommands(cfg *config.Config, notifier *telegrampkg.Notifier
 				return "Usage: /blog_topic <topic1> <topic2> ... or /blog_topic \"topic with spaces\" \"another topic\"", nil
 			}
 
-			addr, password, db, listKey, err := resolveBlogTopicRedisConfig(cfg)
+			addr, password, db, streamKey, err := resolveBlogTopicRedisConfig(cfg)
 			if err != nil {
 				return "", err
 			}
@@ -184,17 +184,25 @@ func startTelegramBotCommands(cfg *config.Config, notifier *telegrampkg.Notifier
 			})
 			defer redisClient.Close()
 
-			values := make([]interface{}, 0, len(topics))
+			published := 0
+			lastID := ""
 			for _, topic := range topics {
-				values = append(values, topic)
+				id, err := redisClient.XAdd(ctx, &redis.XAddArgs{
+					Stream: streamKey,
+					Values: map[string]interface{}{
+						"topic":      topic,
+						"source":     "telegram",
+						"publishedAt": time.Now().Format(time.RFC3339),
+					},
+				}).Result()
+				if err != nil {
+					return "", fmt.Errorf("redis xadd %q: %w", streamKey, err)
+				}
+				published++
+				lastID = id
 			}
 
-			added, err := redisClient.RPush(ctx, listKey, values...).Result()
-			if err != nil {
-				return "", fmt.Errorf("redis rpush %q: %w", listKey, err)
-			}
-
-			return fmt.Sprintf("Added %d topic(s) to redis list %s. List length now: %d", len(topics), listKey, added), nil
+			return fmt.Sprintf("Published %d topic(s) to redis stream %s. Last message ID: %s", published, streamKey, lastID), nil
 		},
 		"/tik_users": func(ctx context.Context, input string) (string, error) {
 			var tikClient *client.ApiClient
@@ -320,7 +328,7 @@ func tokenizeQuoted(s string) []string {
 	return tokens
 }
 
-func resolveBlogTopicRedisConfig(cfg *config.Config) (addr, password string, db int, listKey string, err error) {
+func resolveBlogTopicRedisConfig(cfg *config.Config) (addr, password string, db int, streamKey string, err error) {
 	if cfg == nil {
 		return "", "", 0, "", fmt.Errorf("config is nil")
 	}
@@ -339,11 +347,14 @@ func resolveBlogTopicRedisConfig(cfg *config.Config) (addr, password string, db 
 			}
 			password = job.RedisPassword
 			db = job.RedisDB
-			listKey = strings.TrimSpace(job.RedisTopicList)
-			if listKey == "" {
-				return "", "", 0, "", fmt.Errorf("redis_topic_list is empty in scheduler redis job")
+			streamKey = strings.TrimSpace(job.RedisTopicStream)
+			if streamKey == "" {
+				streamKey = strings.TrimSpace(job.RedisTopicList)
 			}
-			return addr, password, db, listKey, nil
+			if streamKey == "" {
+				return "", "", 0, "", fmt.Errorf("redis_topic_stream is empty in scheduler redis job")
+			}
+			return addr, password, db, streamKey, nil
 		}
 	}
 

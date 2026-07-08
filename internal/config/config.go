@@ -40,6 +40,10 @@ type CronJobConfig struct {
 	RedisAddr      string `yaml:"redis_addr"`
 	RedisPassword  string `yaml:"redis_password"`
 	RedisDB        int    `yaml:"redis_db"`
+	RedisTopicStream string `yaml:"redis_topic_stream"`
+	RedisTopicWaitSeconds int `yaml:"redis_topic_wait_seconds"`
+	RedisTopicMaxRetries int `yaml:"redis_topic_max_retries"`
+	RedisTopicDeadLetterStream string `yaml:"redis_topic_dead_letter_stream"`
 	RedisTopicList string `yaml:"redis_topic_list"`
 }
 

@@ -28,7 +28,10 @@ scheduler:
       redis_addr: "localhost:6379"
       redis_password: ""
       redis_db: 0
-      redis_topic_list: "blog:topics:queue"
+      redis_topic_stream: "blog:topics:stream"
+      redis_topic_wait_seconds: 20
+      redis_topic_max_retries: 5
+      redis_topic_dead_letter_stream: "blog:topics:stream:dlq"
 
 docker:
   enabled: true

@@ -20,7 +20,7 @@ The bot now supports runtime commands from the configured `chat_id`:
 - `/status`: returns current monitor summary and number of active alerts.
 - `/restart <container_name>`: restarts a Docker container by name via Docker socket.
 - `/blog_gen <topic>` or `/gen_blog <topic>`: triggers external `auto_blog` service via HTTP. When a topic is provided, the request body is `{"topic":"<topic>"}`.
-- `/blog_topic <topic1> <topic2> ...`: push one or multiple blog topics into the configured Redis topic list (for cron jobs with `topic_source: redis`).
+- `/blog_topic <topic1> <topic2> ...`: publish one or multiple blog topics into the configured Redis topic stream (for cron jobs with `topic_source: redis`).
 
 
 ## Quick start
@@ -82,7 +82,7 @@ You can run multiple named cron jobs that trigger configured API clients.
 - `topic`: optional topic payload for API triggers that accept it.
 - `topic_source`: `static` (default), `txt`, or `redis`.
 - `topic_file`: topic file path when `topic_source: txt`.
-- `redis_addr`, `redis_password`, `redis_db`, `redis_topic_list`: redis options when `topic_source: redis`.
+- `redis_addr`, `redis_password`, `redis_db`, `redis_topic_stream`, `redis_topic_wait_seconds`, `redis_topic_max_retries`, `redis_topic_dead_letter_stream`: redis options when `topic_source: redis`.
 
 If a cron job fails, admin-svc sends a deduplicated `Cron Job` alert to Telegram and sends recovery when it succeeds again.
 
@@ -90,7 +90,7 @@ Topic behavior:
 
 - `static`: uses `topic` as-is each run.
 - `txt`: reads non-empty lines from `topic_file` and rotates topic round-robin each run.
-- `redis`: pops one topic from redis list (`LPOP redis_topic_list`) each run; empty list triggers cron alert.
+- `redis`: waits for a topic using blocking `XREAD` from `redis_topic_stream`. The message is deleted (`XDEL`) only after API call succeeds, so failed blog generation is retried automatically on later cron runs. When retries reach `redis_topic_max_retries`, the message is moved to `redis_topic_dead_letter_stream` and removed from the main stream.
 
 ### 2. Run with Docker Compose
 

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -21,6 +22,8 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/robfig/cron/v3"
 )
+
+var errNoTopicAvailable = errors.New("no topic available")
 
 // Statistics runs all checks on a fixed interval
 type Statistics struct {
@@ -163,14 +166,26 @@ func (s *Statistics) runCronJob(job config.CronJobConfig, apiClient *client.ApiC
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSeconds)*time.Second)
 	defer cancel()
 
-	topic, err := s.resolveCronTopic(ctx, name, job)
+	topic, ack, onFailure, err := s.resolveCronTopic(ctx, name, job)
 	if err != nil {
+		if errors.Is(err, errNoTopicAvailable) {
+			log.Printf("[cron] no topic yet job=%s source=%s", name, job.TopicSource)
+			return
+		}
 		s.handleAlert(key, "Cron Job", name, "resolve topic failed: "+err.Error())
 		return
 	}
 
 	status, detail, err := apiClient.Trigger(ctx, topic)
 	if err != nil {
+		if onFailure != nil {
+			if failureNote, handlerErr := onFailure(ctx, err); handlerErr != nil {
+				log.Printf("[cron] failure handler error job=%s: %v", name, handlerErr)
+			} else if failureNote != "" {
+				log.Printf("[cron] %s", failureNote)
+			}
+		}
+
 		s.handleAlert(
 			key,
 			"Cron Job",
@@ -180,29 +195,36 @@ func (s *Statistics) runCronJob(job config.CronJobConfig, apiClient *client.ApiC
 		return
 	}
 
+	if ack != nil {
+		if err := ack(ctx); err != nil {
+			s.handleAlert(key, "Cron Job", name, "ack topic failed: "+err.Error())
+			return
+		}
+	}
+
 	s.handleRecovery(key, "Cron Job", name)
 	log.Printf("[cron] success job=%s api=%s topic=%q status=%d", name, safeAPIName(apiClient), topic, status)
 }
 
-func (s *Statistics) resolveCronTopic(ctx context.Context, jobName string, job config.CronJobConfig) (string, error) {
+func (s *Statistics) resolveCronTopic(ctx context.Context, jobName string, job config.CronJobConfig) (string, func(context.Context) error, func(context.Context, error) (string, error), error) {
 	source := normalizeKey(job.TopicSource)
 	if source == "" || source == "static" {
-		return strings.TrimSpace(job.Topic), nil
+		return strings.TrimSpace(job.Topic), nil, nil, nil
 	}
 
 	if source == "txt" || source == "text" || source == "file" {
 		topics, err := loadTopicsFromFile(job.TopicFile)
 		if err != nil {
-			return "", err
+			return "", nil, nil, err
 		}
-		return s.nextTopicRoundRobin(jobName, topics), nil
+		return s.nextTopicRoundRobin(jobName, topics), nil, nil, nil
 	}
 
 	if source == "redis" {
-		return s.popTopicFromRedis(ctx, job)
+		return s.popTopicFromRedisStream(ctx, job)
 	}
 
-	return "", fmt.Errorf("unsupported topic_source=%q", job.TopicSource)
+	return "", nil, nil, fmt.Errorf("unsupported topic_source=%q", job.TopicSource)
 }
 
 func loadTopicsFromFile(path string) ([]string, error) {
@@ -241,34 +263,123 @@ func (s *Statistics) nextTopicRoundRobin(jobName string, topics []string) string
 	return topic
 }
 
-func (s *Statistics) popTopicFromRedis(ctx context.Context, job config.CronJobConfig) (string, error) {
+func (s *Statistics) popTopicFromRedisStream(ctx context.Context, job config.CronJobConfig) (string, func(context.Context) error, func(context.Context, error) (string, error), error) {
 	addr := strings.TrimSpace(job.RedisAddr)
 	if addr == "" {
 		addr = "localhost:6379"
 	}
 
-	listKey := strings.TrimSpace(job.RedisTopicList)
-	if listKey == "" {
-		return "", fmt.Errorf("redis_topic_list is empty")
+	streamKey := strings.TrimSpace(job.RedisTopicStream)
+	if streamKey == "" {
+		streamKey = strings.TrimSpace(job.RedisTopicList)
+	}
+	if streamKey == "" {
+		return "", nil, nil, fmt.Errorf("redis_topic_stream is empty")
+	}
+
+	maxRetries := job.RedisTopicMaxRetries
+	if maxRetries <= 0 {
+		maxRetries = 5
+	}
+
+	dlqStream := strings.TrimSpace(job.RedisTopicDeadLetterStream)
+	if dlqStream == "" {
+		dlqStream = streamKey + ":dlq"
 	}
 
 	redisKey := addr + "|" + strconv.Itoa(job.RedisDB) + "|" + job.RedisPassword
 	client := s.getRedisClient(redisKey, addr, job.RedisPassword, job.RedisDB)
+	retryStateKey := streamKey + ":retries"
 
-	val, err := client.LPop(ctx, listKey).Result()
+	waitSeconds := job.RedisTopicWaitSeconds
+	if waitSeconds <= 0 {
+		waitSeconds = 20
+	}
+
+	streams, err := client.XRead(ctx, &redis.XReadArgs{
+		Streams: []string{streamKey, "0"},
+		Count:   1,
+		Block:   time.Duration(waitSeconds) * time.Second,
+	}).Result()
 	if err != nil {
-		if err == redis.Nil {
-			return "", fmt.Errorf("redis topic list is empty")
+		if errors.Is(err, redis.Nil) {
+			return "", nil, nil, errNoTopicAvailable
 		}
-		return "", fmt.Errorf("redis lpop %q: %w", listKey, err)
+		return "", nil, nil, fmt.Errorf("redis xread %q: %w", streamKey, err)
+	}
+	if len(streams) == 0 || len(streams[0].Messages) == 0 {
+		return "", nil, nil, errNoTopicAvailable
 	}
 
-	topic := strings.TrimSpace(val)
+	msg := streams[0].Messages[0]
+	topic := strings.TrimSpace(fmt.Sprint(msg.Values["topic"]))
 	if topic == "" {
-		return "", fmt.Errorf("redis topic is empty")
+		topic = strings.TrimSpace(fmt.Sprint(msg.Values["value"]))
+	}
+	if topic == "" {
+		for _, v := range msg.Values {
+			topic = strings.TrimSpace(fmt.Sprint(v))
+			if topic != "" {
+				break
+			}
+		}
+	}
+	if topic == "" {
+		return "", nil, nil, fmt.Errorf("redis stream message has empty topic")
 	}
 
-	return topic, nil
+	ack := func(ackCtx context.Context) error {
+		_, err := client.XDel(ackCtx, streamKey, msg.ID).Result()
+		if err != nil {
+			return fmt.Errorf("redis xdel %q id=%s: %w", streamKey, msg.ID, err)
+		}
+		if _, err := client.HDel(ackCtx, retryStateKey, msg.ID).Result(); err != nil {
+			return fmt.Errorf("redis hdel %q field=%s: %w", retryStateKey, msg.ID, err)
+		}
+		return nil
+	}
+
+	onFailure := func(failCtx context.Context, triggerErr error) (string, error) {
+		retries, err := client.HIncrBy(failCtx, retryStateKey, msg.ID, 1).Result()
+		if err != nil {
+			return "", fmt.Errorf("redis hincrby %q field=%s: %w", retryStateKey, msg.ID, err)
+		}
+
+		if retries < int64(maxRetries) {
+			return fmt.Sprintf("cron redis retry scheduled stream=%s msg_id=%s retries=%d/%d", streamKey, msg.ID, retries, maxRetries), nil
+		}
+
+		dlqValues := map[string]interface{}{
+			"topic":        topic,
+			"original_id":  msg.ID,
+			"retries":      retries,
+			"error":        truncateDetail(triggerErr.Error(), 300),
+			"failed_at":    time.Now().Format(time.RFC3339),
+			"source_stream": streamKey,
+		}
+		for k, v := range msg.Values {
+			dlqValues["original_"+k] = v
+		}
+
+		if _, err := client.XAdd(failCtx, &redis.XAddArgs{
+			Stream: dlqStream,
+			Values: dlqValues,
+		}).Result(); err != nil {
+			return "", fmt.Errorf("redis xadd dlq %q: %w", dlqStream, err)
+		}
+
+		if _, err := client.XDel(failCtx, streamKey, msg.ID).Result(); err != nil {
+			return "", fmt.Errorf("redis xdel %q id=%s after dlq: %w", streamKey, msg.ID, err)
+		}
+
+		if _, err := client.HDel(failCtx, retryStateKey, msg.ID).Result(); err != nil {
+			return "", fmt.Errorf("redis hdel %q field=%s after dlq: %w", retryStateKey, msg.ID, err)
+		}
+
+		return fmt.Sprintf("cron redis moved to dlq stream=%s msg_id=%s retries=%d", dlqStream, msg.ID, retries), nil
+	}
+
+	return topic, ack, onFailure, nil
 }
 
 func (s *Statistics) getRedisClient(key, addr, password string, db int) *redis.Client {
