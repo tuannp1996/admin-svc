@@ -19,6 +19,7 @@ import (
 	"admin-svc/internal/docker"
 	telegrampkg "admin-svc/internal/infrastructure/telegram"
 	"admin-svc/internal/service"
+
 	"github.com/redis/go-redis/v9"
 )
 
@@ -190,8 +191,8 @@ func startTelegramBotCommands(cfg *config.Config, notifier *telegrampkg.Notifier
 				id, err := redisClient.XAdd(ctx, &redis.XAddArgs{
 					Stream: streamKey,
 					Values: map[string]interface{}{
-						"topic":      topic,
-						"source":     "telegram",
+						"topic":       topic,
+						"source":      "telegram",
 						"publishedAt": time.Now().Format(time.RFC3339),
 					},
 				}).Result()
@@ -333,29 +334,31 @@ func resolveBlogTopicRedisConfig(cfg *config.Config) (addr, password string, db 
 		return "", "", 0, "", fmt.Errorf("config is nil")
 	}
 
+	var foundRedisJob bool
 	for _, job := range cfg.Scheduler.Jobs {
 		if normalizeKeyMain(job.TopicSource) != "redis" {
 			continue
 		}
+		foundRedisJob = true
 
-		apiName := normalizeKeyMain(job.API)
-		jobName := normalizeKeyMain(job.Name)
-		if apiName == "bloggenarticle" || jobName == "bloggenredis" || strings.Contains(jobName, "blog") {
-			addr = strings.TrimSpace(job.RedisAddr)
-			if addr == "" {
-				addr = "localhost:6379"
-			}
-			password = job.RedisPassword
-			db = job.RedisDB
-			streamKey = strings.TrimSpace(job.RedisTopicStream)
-			if streamKey == "" {
-				streamKey = strings.TrimSpace(job.RedisTopicList)
-			}
-			if streamKey == "" {
-				return "", "", 0, "", fmt.Errorf("redis_topic_stream is empty in scheduler redis job")
-			}
-			return addr, password, db, streamKey, nil
+		addr = strings.TrimSpace(job.RedisAddr)
+		if addr == "" {
+			addr = "localhost:6379"
 		}
+		password = job.RedisPassword
+		db = job.RedisDB
+		streamKey = strings.TrimSpace(job.RedisTopicStream)
+		if streamKey == "" {
+			streamKey = strings.TrimSpace(job.RedisTopicList)
+		}
+		if streamKey == "" {
+			continue
+		}
+		return addr, password, db, streamKey, nil
+	}
+
+	if foundRedisJob {
+		return "", "", 0, "", fmt.Errorf("redis_topic_stream is empty in scheduler redis job")
 	}
 
 	return "", "", 0, "", fmt.Errorf("no scheduler redis job found for blog topics; configure scheduler.jobs with topic_source=redis")
