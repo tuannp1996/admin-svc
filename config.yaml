@@ -14,14 +14,14 @@ scheduler:
       topic_file: "./topics/blog_topics.txt"
       topic: ""                # used only when topic_source=static
     - name: "tik_users"
-      enabled: false
+      enabled: true
       cron: "0 0 20 * * *"   # Every day at 20:00
       service: "TIKTOK-CONNECTOR"
       api: "TIKTOK Get Users"
       topic: ""
     - name: "blog_gen_redis"
-      enabled: false
-      cron: "0 30 7 * * *"   # Every day at 07:30
+      enabled: true
+      cron: "0 */3 * * * *"   # Every 3 hours
       service: "BLOG-AUTO"
       api: "BLOG Gen Article"
       topic_source: "redis"

@@ -19,6 +19,7 @@ import (
 	"admin-svc/internal/docker"
 	"admin-svc/internal/health"
 	"admin-svc/internal/usecase/port"
+
 	"github.com/redis/go-redis/v9"
 	"github.com/robfig/cron/v3"
 )
@@ -350,11 +351,11 @@ func (s *Statistics) popTopicFromRedisStream(ctx context.Context, job config.Cro
 		}
 
 		dlqValues := map[string]interface{}{
-			"topic":        topic,
-			"original_id":  msg.ID,
-			"retries":      retries,
-			"error":        truncateDetail(triggerErr.Error(), 300),
-			"failed_at":    time.Now().Format(time.RFC3339),
+			"topic":         topic,
+			"original_id":   msg.ID,
+			"retries":       retries,
+			"error":         truncateDetail(triggerErr.Error(), 300),
+			"failed_at":     time.Now().Format(time.RFC3339),
 			"source_stream": streamKey,
 		}
 		for k, v := range msg.Values {
