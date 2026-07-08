@@ -43,6 +43,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("[main] config: %v", err)
 	}
+	logSchedulerJobs(cfg)
 
 	notifier := telegrampkg.New(cfg.Telegram.BotToken, cfg.Telegram.ChatID)
 	services := client.New(cfg.Clients)
@@ -115,6 +116,38 @@ func collectEnabledChecks(cfg *config.Config) []string {
 		}
 	}
 	return list
+}
+
+func logSchedulerJobs(cfg *config.Config) {
+	if cfg == nil {
+		log.Printf("[main] scheduler config unavailable: nil config")
+		return
+	}
+
+	if len(cfg.Scheduler.Jobs) == 0 {
+		log.Printf("[main] scheduler.jobs is empty")
+		return
+	}
+
+	redisJobs := 0
+	for i, job := range cfg.Scheduler.Jobs {
+		source := strings.TrimSpace(job.TopicSource)
+		normalized := normalizeKeyMain(source)
+		if normalized == "redis" {
+			redisJobs++
+		}
+
+		log.Printf(
+			"[main] scheduler.job[%d] name=%q enabled=%t topic_source=%q redis_stream=%q",
+			i,
+			job.Name,
+			job.Enabled,
+			source,
+			strings.TrimSpace(job.RedisTopicStream),
+		)
+	}
+
+	log.Printf("[main] scheduler redis topic jobs detected: %d", redisJobs)
 }
 
 func startTelegramBotCommands(cfg *config.Config, notifier *telegrampkg.Notifier, statistic *service.Statistics, services *[]client.Service, dockerChecker *docker.Checker) (context.Context, context.CancelFunc) {

@@ -2,10 +2,7 @@ version: "3.9"
 
 services:
   admin-svc:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: admin-svc:local
+    image: ${DOCKER_IMAGE:-ghcr.io/tuannp1996/admin-svc:latest}
     container_name: admin-svc
     restart: unless-stopped
     volumes:
