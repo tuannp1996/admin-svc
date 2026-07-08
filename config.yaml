@@ -25,7 +25,7 @@ scheduler:
       service: "BLOG-AUTO"
       api: "BLOG Gen Article"
       topic_source: "redis"
-      redis_addr: "localhost:6379"
+      redis_addr: "redis:6379"
       redis_password: ""
       redis_db: 0
       redis_topic_stream: "blog:topics:stream"
