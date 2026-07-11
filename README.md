@@ -21,6 +21,13 @@ The bot now supports runtime commands from the configured `chat_id`:
 - `/restart <container_name>`: restarts a Docker container by name via Docker socket.
 - `/blog_gen <topic>` or `/gen_blog <topic>`: triggers external `auto_blog` service via HTTP. When a topic is provided, the request body is `{"topic":"<topic>"}`.
 - `/blog_topic <topic1> <topic2> ...`: publish one or multiple blog topics into the configured Redis topic stream (for cron jobs with `topic_source: redis`).
+- `/blog_articles [status] [limit]`: list recent articles; status defaults to `pending` and limit defaults to 10.
+- `/blog_view <article_id>`: show article status and metadata.
+- `/blog_approve <article_id>`: approve a pending article.
+- `/blog_publish <article_id>`: publish an approved article.
+- `/blog_approve_publish <article_id>`: approve and publish in one action.
+- `/blog_hide <article_id>`: hide a published article.
+- `/blog_cover <id|slug> <minio_image_path>`: assign an existing MinIO image as an article cover.
 
 
 ## Quick start
@@ -33,6 +40,10 @@ Edit `config.yaml`:
 telegram:
   bot_token: "${TELEGRAM_BOT_TOKEN}"   # or paste directly
   chat_id: "${TELEGRAM_CHAT_ID}"
+
+blog_admin:
+  base_url: "http://localhost:8087/api/admin/service"
+  timeout_seconds: 30
 
 scheduler:
   interval_seconds: 60

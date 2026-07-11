@@ -231,7 +231,7 @@ func (n *Notifier) handleUpdate(ctx context.Context, upd telegramUpdate, handler
 
 	handler, ok := handlers[command]
 	if !ok {
-		_ = n.SendPlain("Unknown command. Available: /status /restart /blog_gen /blog_topic /tik_users /exec")
+		_ = n.SendPlain("Unknown command. Available: /status /restart /blog_gen /blog_topic /blog_articles /blog_view /blog_approve /blog_publish /blog_approve_publish /blog_hide /blog_cover /tik_users /exec")
 		return
 	}
 

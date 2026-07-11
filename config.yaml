@@ -2,6 +2,10 @@ telegram:
   bot_token: "${TELEGRAM_BOT_TOKEN}"
   chat_id: "${TELEGRAM_CHAT_ID}"
 
+blog_admin:
+  base_url: "http://localhost:8087/api/admin/service"
+  timeout_seconds: 30
+
 scheduler:
   interval_seconds: 150  # How often to run all checks
   jobs:

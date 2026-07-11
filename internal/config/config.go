@@ -16,6 +16,12 @@ type Config struct {
 	CurlChecks   CurlChecksConfig   `yaml:"curl_checks"`
 	PageChecks   PageChecksConfig   `yaml:"page_checks"`
 	Clients      ClientConfig       `yaml:"clients"`
+	BlogAdmin    BlogAdminConfig    `yaml:"blog_admin"`
+}
+
+type BlogAdminConfig struct {
+	BaseURL        string `yaml:"base_url"`
+	TimeoutSeconds int    `yaml:"timeout_seconds"`
 }
 
 type TelegramConfig struct {
@@ -24,27 +30,27 @@ type TelegramConfig struct {
 }
 
 type SchedulerConfig struct {
-	IntervalSeconds int `yaml:"interval_seconds"`
+	IntervalSeconds int             `yaml:"interval_seconds"`
 	Jobs            []CronJobConfig `yaml:"jobs"`
 }
 
 type CronJobConfig struct {
-	Enabled        bool   `yaml:"enabled"`
-	Name           string `yaml:"name"`
-	Cron           string `yaml:"cron"`
-	Service        string `yaml:"service"`
-	API            string `yaml:"api"`
-	Topic          string `yaml:"topic"`
-	TopicSource    string `yaml:"topic_source"`
-	TopicFile      string `yaml:"topic_file"`
-	RedisAddr      string `yaml:"redis_addr"`
-	RedisPassword  string `yaml:"redis_password"`
-	RedisDB        int    `yaml:"redis_db"`
-	RedisTopicStream string `yaml:"redis_topic_stream"`
-	RedisTopicWaitSeconds int `yaml:"redis_topic_wait_seconds"`
-	RedisTopicMaxRetries int `yaml:"redis_topic_max_retries"`
+	Enabled                    bool   `yaml:"enabled"`
+	Name                       string `yaml:"name"`
+	Cron                       string `yaml:"cron"`
+	Service                    string `yaml:"service"`
+	API                        string `yaml:"api"`
+	Topic                      string `yaml:"topic"`
+	TopicSource                string `yaml:"topic_source"`
+	TopicFile                  string `yaml:"topic_file"`
+	RedisAddr                  string `yaml:"redis_addr"`
+	RedisPassword              string `yaml:"redis_password"`
+	RedisDB                    int    `yaml:"redis_db"`
+	RedisTopicStream           string `yaml:"redis_topic_stream"`
+	RedisTopicWaitSeconds      int    `yaml:"redis_topic_wait_seconds"`
+	RedisTopicMaxRetries       int    `yaml:"redis_topic_max_retries"`
 	RedisTopicDeadLetterStream string `yaml:"redis_topic_dead_letter_stream"`
-	RedisTopicList string `yaml:"redis_topic_list"`
+	RedisTopicList             string `yaml:"redis_topic_list"`
 }
 
 type DockerConfig struct {
@@ -91,12 +97,12 @@ type PageChecksConfig struct {
 }
 
 type PageCheck struct {
-	Name           string `yaml:"name"`
-	URL            string `yaml:"url"`
-	ExpectedStatus int    `yaml:"expected_status"`
-	ContainsText   string `yaml:"contains_text"`
-	RecoveryCommand string `yaml:"recovery_command"`
-	RecoveryTimeoutSeconds int `yaml:"recovery_timeout_seconds"`
+	Name                   string `yaml:"name"`
+	URL                    string `yaml:"url"`
+	ExpectedStatus         int    `yaml:"expected_status"`
+	ContainsText           string `yaml:"contains_text"`
+	RecoveryCommand        string `yaml:"recovery_command"`
+	RecoveryTimeoutSeconds int    `yaml:"recovery_timeout_seconds"`
 }
 
 type ClientConfig struct {
@@ -210,6 +216,9 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.PageChecks.TimeoutSeconds <= 0 {
 		cfg.PageChecks.TimeoutSeconds = 15
+	}
+	if cfg.BlogAdmin.TimeoutSeconds <= 0 {
+		cfg.BlogAdmin.TimeoutSeconds = 30
 	}
 
 	return &cfg, nil

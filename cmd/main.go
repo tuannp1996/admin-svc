@@ -47,6 +47,7 @@ func main() {
 
 	notifier := telegrampkg.New(cfg.Telegram.BotToken, cfg.Telegram.ChatID)
 	services := client.New(cfg.Clients)
+	blogAdmin := client.NewBlogAdmin(cfg.BlogAdmin.BaseURL, cfg.BlogAdmin.TimeoutSeconds)
 
 	var dockerChecker *docker.Checker
 	if cfg.Docker.Enabled {
@@ -59,7 +60,7 @@ func main() {
 
 	statistics := service.New(cfg, notifier, dockerChecker, services)
 
-	_, cancelCommands := startTelegramBotCommands(cfg, notifier, statistics, services, dockerChecker)
+	_, cancelCommands := startTelegramBotCommands(cfg, notifier, statistics, services, blogAdmin, dockerChecker)
 	defer cancelCommands()
 
 	checks := collectEnabledChecks(cfg)
@@ -150,7 +151,7 @@ func logSchedulerJobs(cfg *config.Config) {
 	log.Printf("[main] scheduler redis topic jobs detected: %d", redisJobs)
 }
 
-func startTelegramBotCommands(cfg *config.Config, notifier *telegrampkg.Notifier, statistic *service.Statistics, services *[]client.Service, dockerChecker *docker.Checker) (context.Context, context.CancelFunc) {
+func startTelegramBotCommands(cfg *config.Config, notifier *telegrampkg.Notifier, statistic *service.Statistics, services *[]client.Service, blogAdmin *client.BlogAdminClient, dockerChecker *docker.Checker) (context.Context, context.CancelFunc) {
 	commandCtx, cancelCommands := context.WithCancel(context.Background())
 
 	allowedExecCommands := map[string]struct{}{
@@ -238,6 +239,50 @@ func startTelegramBotCommands(cfg *config.Config, notifier *telegrampkg.Notifier
 
 			return fmt.Sprintf("Published %d topic(s) to redis stream %s. Last message ID: %s", published, streamKey, lastID), nil
 		},
+		"/blog_articles": func(ctx context.Context, input string) (string, error) {
+			status, limit, err := parseBlogListInput(input)
+			if err != nil {
+				return "", err
+			}
+			articles, err := blogAdmin.List(ctx, status, limit)
+			if err != nil {
+				return "", err
+			}
+			return formatBlogArticleList(articles, status), nil
+		},
+		"/blog_view": func(ctx context.Context, input string) (string, error) {
+			articleID, err := parseArticleID(input, "/blog_view")
+			if err != nil {
+				return "", err
+			}
+			article, err := blogAdmin.Get(ctx, articleID)
+			if err != nil {
+				return "", err
+			}
+			return formatBlogArticle(*article), nil
+		},
+		"/blog_approve":         blogActionHandler(blogAdmin, "approve", "/blog_approve"),
+		"/blog_publish":         blogActionHandler(blogAdmin, "publish", "/blog_publish"),
+		"/blog_approve_publish": blogActionHandler(blogAdmin, "approve-and-publish", "/blog_approve_publish"),
+		"/blog_hide":            blogActionHandler(blogAdmin, "hide", "/blog_hide"),
+		"/blog_cover": func(ctx context.Context, input string) (string, error) {
+			parts := strings.Fields(strings.TrimSpace(input))
+			if len(parts) != 2 {
+				return "", fmt.Errorf("usage: /blog_cover <id|slug> <minio_image_path>")
+			}
+			result, err := blogAdmin.SetCover(ctx, parts[0], parts[1])
+			if err != nil {
+				return "", err
+			}
+			return fmt.Sprintf(
+				"Cover updated for article #%d (%s)\nMinIO: %s\nView: %s%s",
+				result.ArticleID,
+				result.Slug,
+				result.ImagePath,
+				strings.TrimRight(cfg.BlogAdmin.BaseURL, "/"),
+				result.ViewURL,
+			), nil
+		},
 		"/tik_users": func(ctx context.Context, input string) (string, error) {
 			var tikClient *client.ApiClient
 			for _, s := range *services {
@@ -280,6 +325,86 @@ func startTelegramBotCommands(cfg *config.Config, notifier *telegrampkg.Notifier
 	})
 
 	return commandCtx, cancelCommands
+}
+
+func parseBlogListInput(input string) (string, int, error) {
+	status := "pending"
+	limit := 10
+	parts := strings.Fields(strings.ToLower(strings.TrimSpace(input)))
+	if len(parts) > 2 {
+		return "", 0, fmt.Errorf("usage: /blog_articles [pending|approved|published|rejected|all] [limit]")
+	}
+	if len(parts) >= 1 {
+		status = parts[0]
+	}
+	valid := map[string]bool{"pending": true, "approved": true, "published": true, "rejected": true, "all": true}
+	if !valid[status] {
+		return "", 0, fmt.Errorf("invalid status %q", status)
+	}
+	if len(parts) == 2 {
+		parsed, err := strconv.Atoi(parts[1])
+		if err != nil || parsed < 1 || parsed > 10 {
+			return "", 0, fmt.Errorf("limit must be 1-10")
+		}
+		limit = parsed
+	}
+	return status, limit, nil
+}
+
+func parseArticleID(input, command string) (int, error) {
+	articleID, err := strconv.Atoi(strings.TrimSpace(input))
+	if err != nil || articleID <= 0 {
+		return 0, fmt.Errorf("usage: %s <article_id>", command)
+	}
+	return articleID, nil
+}
+
+func blogActionHandler(blogAdmin *client.BlogAdminClient, action, command string) telegrampkg.CommandHandler {
+	return func(ctx context.Context, input string) (string, error) {
+		articleID, err := parseArticleID(input, command)
+		if err != nil {
+			return "", err
+		}
+		article, err := blogAdmin.Action(ctx, articleID, action)
+		if err != nil {
+			return "", err
+		}
+		return formatBlogArticle(*article), nil
+	}
+}
+
+func formatBlogArticleList(articles []client.BlogArticle, status string) string {
+	if len(articles) == 0 {
+		return fmt.Sprintf("No articles found for status: %s", status)
+	}
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("Articles (%s): %d", status, len(articles)))
+	for _, article := range articles {
+		b.WriteString(fmt.Sprintf("\n\n#%d [%s]\n%s", article.ID, article.Status, article.Title))
+		if article.Category != "" {
+			b.WriteString("\nCategory: " + article.Category)
+		}
+	}
+	b.WriteString("\n\nUse /blog_view <id> to view details.")
+	return b.String()
+}
+
+func formatBlogArticle(article client.BlogArticle) string {
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("Article #%d\nStatus: %s\nTitle: %s", article.ID, article.Status, article.Title))
+	if article.Category != "" {
+		b.WriteString("\nCategory: " + article.Category)
+	}
+	if article.Slug != "" {
+		b.WriteString("\nSlug: " + article.Slug)
+	}
+	if description, ok := article.FrontMatter["description"].(string); ok && description != "" {
+		b.WriteString("\n\n" + description)
+	}
+	if cover, ok := article.FrontMatter["coverImage"].(string); ok && cover != "" {
+		b.WriteString("\n\nCover: " + cover)
+	}
+	return b.String()
 }
 
 func parseTopicsInput(input string) []string {
