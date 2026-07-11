@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -27,6 +28,80 @@ type ApiClient struct {
 
 type triggerRequest struct {
 	Topic string `json:"topic"`
+}
+
+type GeneratedArticle struct {
+	ID      string
+	Slug    string
+	Summary string
+}
+
+func ParseGeneratedArticle(detail string) (GeneratedArticle, error) {
+	var payload interface{}
+	if err := json.Unmarshal([]byte(detail), &payload); err != nil {
+		return GeneratedArticle{}, fmt.Errorf("decode generated article response: %w", err)
+	}
+
+	articleMap := findArticleMap(payload)
+	if articleMap == nil {
+		return GeneratedArticle{}, fmt.Errorf("generated article response has no article object")
+	}
+
+	article := GeneratedArticle{
+		ID:      jsonValueString(articleMap["id"]),
+		Slug:    jsonValueString(articleMap["slug"]),
+		Summary: firstString(articleMap, "summary", "description", "excerpt"),
+	}
+	if article.Summary == "" {
+		if frontMatter, ok := articleMap["front_matter"].(map[string]interface{}); ok {
+			article.Summary = firstString(frontMatter, "summary", "description", "excerpt")
+		}
+	}
+	if article.ID == "" && article.Slug == "" {
+		return GeneratedArticle{}, fmt.Errorf("generated article response has no id or slug")
+	}
+	return article, nil
+}
+
+func findArticleMap(value interface{}) map[string]interface{} {
+	m, ok := value.(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	if _, hasID := m["id"]; hasID {
+		return m
+	}
+	if _, hasSlug := m["slug"]; hasSlug {
+		return m
+	}
+	for _, key := range []string{"article", "data", "result"} {
+		if nested := findArticleMap(m[key]); nested != nil {
+			return nested
+		}
+	}
+	return nil
+}
+
+func firstString(values map[string]interface{}, keys ...string) string {
+	for _, key := range keys {
+		if value := jsonValueString(values[key]); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func jsonValueString(value interface{}) string {
+	switch v := value.(type) {
+	case string:
+		return strings.TrimSpace(v)
+	case float64:
+		return strconv.FormatFloat(v, 'f', -1, 64)
+	case json.Number:
+		return v.String()
+	default:
+		return ""
+	}
 }
 
 func New(cfg config.ClientConfig) *[]Service {
@@ -96,7 +171,7 @@ func (c *ApiClient) Trigger(ctx context.Context, topic string) (int, string, err
 	}
 	defer resp.Body.Close()
 
-	responseBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+	responseBody, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 	detail := strings.TrimSpace(string(responseBody))
 	if detail == "" {
 		detail = "(empty response body)"

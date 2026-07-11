@@ -19,8 +19,8 @@ The bot now supports runtime commands from the configured `chat_id`:
 
 - `/status`: returns current monitor summary and number of active alerts.
 - `/restart <container_name>`: restarts a Docker container by name via Docker socket.
-- `/blog_gen <topic>` or `/gen_blog <topic>`: triggers external `auto_blog` service via HTTP. When a topic is provided, the request body is `{"topic":"<topic>"}`.
-- `/blog_topic <topic1> <topic2> ...`: publish one or multiple blog topics into the configured Redis topic stream (for cron jobs with `topic_source: redis`).
+- `/blog_gen <topic>` or `/gen_blog <topic>`: triggers external `auto_blog` service via HTTP. Topics must contain at least 4 words.
+- `/blog_topic "<topic1>" "<topic2>" ...`: publish one or multiple topics of at least 4 words into the configured Redis stream.
 - `/blog_articles [status] [limit]`: list recent articles; status defaults to `pending` and limit defaults to 10.
 - `/blog_view <article_id>`: show article status and metadata.
 - `/blog_approve <article_id>`: approve a pending article.
@@ -50,12 +50,12 @@ scheduler:
   jobs:
     - name: "blog_gen"
       enabled: true
-      cron: "0 0 7 * * *"
+      cron: "0 */4 * * * *"
       service: "BLOG-AUTO"
       api: "BLOG Gen Article"
-      topic_source: "txt"
-      topic_file: "./topics/blog_topics.txt"
-      topic: ""
+      topic_source: "redis"
+      redis_addr: "localhost:6379"
+      redis_topic_stream: "blog:topics:stream"
 
 docker:
   enabled: true
@@ -90,18 +90,21 @@ You can run multiple named cron jobs that trigger configured API clients.
 - `cron`: cron expression (supports both 5-field and 6-field with optional seconds).
 - `service`: service name from `clients.service[].name` (optional but recommended).
 - `api`: API name from `clients.service[].api[].name`.
-- `topic`: optional topic payload for API triggers that accept it.
-- `topic_source`: `static` (default), `txt`, or `redis`.
-- `topic_file`: topic file path when `topic_source: txt`.
+- `topic`: optional static topic payload for API triggers that accept it.
+- `topic_source`: `static` (default) or `redis`.
 - `redis_addr`, `redis_password`, `redis_db`, `redis_topic_stream`, `redis_topic_wait_seconds`, `redis_topic_max_retries`, `redis_topic_dead_letter_stream`: redis options when `topic_source: redis`.
 
 If a cron job fails, admin-svc sends a deduplicated `Cron Job` alert to Telegram and sends recovery when it succeeds again.
+After a blog article is generated successfully, the bot sends its ID, slug, summary, and ready-to-use commands for setting the cover, approving, or approving and publishing it.
+The daily `tik_users` cron sends the successful API response to Telegram at 20:00 Asia/Ho_Chi_Minh time.
 
 Topic behavior:
 
 - `static`: uses `topic` as-is each run.
-- `txt`: reads non-empty lines from `topic_file` and rotates topic round-robin each run.
 - `redis`: waits for a topic using blocking `XREAD` from `redis_topic_stream`. The message is deleted (`XDEL`) only after API call succeeds, so failed blog generation is retried automatically on later cron runs. When retries reach `redis_topic_max_retries`, the message is moved to `redis_topic_dead_letter_stream` and removed from the main stream.
+
+Blog topics are validated before publishing, manual generation, and cron generation; each topic must contain at least 4 whitespace-separated words.
+Invalid topics already present in Redis are deleted and skipped without calling the article generation API.
 
 ### 2. Run with Docker Compose
 

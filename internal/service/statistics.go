@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"os"
 	"os/exec"
 	"runtime"
 	"runtime/debug"
@@ -18,6 +17,7 @@ import (
 	"admin-svc/internal/config"
 	"admin-svc/internal/docker"
 	"admin-svc/internal/health"
+	topicpkg "admin-svc/internal/topic"
 	"admin-svc/internal/usecase/port"
 
 	"github.com/redis/go-redis/v9"
@@ -39,7 +39,6 @@ type Statistics struct {
 	// Track which checks are currently in alert state to avoid re-sending
 	alertState map[string]bool
 	mu         sync.Mutex
-	topicIndex map[string]int
 	redisConns map[string]*redis.Client
 }
 
@@ -58,7 +57,6 @@ func New(
 		page:       health.New(cfg.PageChecks.TimeoutSeconds),
 		services:   services,
 		alertState: make(map[string]bool),
-		topicIndex: make(map[string]int),
 		redisConns: make(map[string]*redis.Client),
 	}
 }
@@ -205,6 +203,42 @@ func (s *Statistics) runCronJob(job config.CronJobConfig, apiClient *client.ApiC
 
 	s.handleRecovery(key, "Cron Job", name)
 	log.Printf("[cron] success job=%s api=%s topic=%q status=%d", name, safeAPIName(apiClient), topic, status)
+	switch normalizeKey(safeAPIName(apiClient)) {
+	case "bloggenarticle":
+		if article, parseErr := client.ParseGeneratedArticle(detail); parseErr != nil {
+			log.Printf("[cron] generated article response parse failed job=%s: %v", name, parseErr)
+		} else if err := s.notifier.SendPlain(formatGeneratedArticleMessage(article)); err != nil {
+			log.Printf("[telegram] send generated article error: %v", err)
+		}
+	case "tiktokgetusers":
+		if err := s.notifier.SendPlain(formatTikTokUsersMessage(status, detail)); err != nil {
+			log.Printf("[telegram] send TikTok users error: %v", err)
+		}
+	}
+}
+
+func formatTikTokUsersMessage(status int, detail string) string {
+	detail = truncateDetail(detail, 3500)
+	return fmt.Sprintf(
+		"✅ TikTok users lúc 20:00\n\nHTTP status: %d\nResponse:\n%s",
+		status,
+		detail,
+	)
+}
+
+func formatGeneratedArticleMessage(article client.GeneratedArticle) string {
+	summary := strings.TrimSpace(article.Summary)
+	if summary == "" {
+		summary = "(không có summary trong response)"
+	}
+	identifier := article.ID
+	if identifier == "" {
+		identifier = article.Slug
+	}
+	return fmt.Sprintf(
+		"✅ Đã tạo bài viết thành công\n\nID: %s\nSlug: %s\nSummary: %s\n\nUpload cover:\n/blog_cover %s <minio_image_path>\n\nDuyệt:\n/blog_approve %s\n\nXuất bản:\n/blog_publish %s\n\nDuyệt & xuất bản:\n/blog_approve_publish %s",
+		article.ID, article.Slug, summary, identifier, identifier, identifier, identifier,
+	)
 }
 
 func (s *Statistics) resolveCronTopic(ctx context.Context, jobName string, job config.CronJobConfig) (string, func(context.Context) error, func(context.Context, error) (string, error), error) {
@@ -213,55 +247,11 @@ func (s *Statistics) resolveCronTopic(ctx context.Context, jobName string, job c
 		return strings.TrimSpace(job.Topic), nil, nil, nil
 	}
 
-	if source == "txt" || source == "text" || source == "file" {
-		topics, err := loadTopicsFromFile(job.TopicFile)
-		if err != nil {
-			return "", nil, nil, err
-		}
-		return s.nextTopicRoundRobin(jobName, topics), nil, nil, nil
-	}
-
 	if source == "redis" {
 		return s.popTopicFromRedisStream(ctx, job)
 	}
 
 	return "", nil, nil, fmt.Errorf("unsupported topic_source=%q", job.TopicSource)
-}
-
-func loadTopicsFromFile(path string) ([]string, error) {
-	filePath := strings.TrimSpace(path)
-	if filePath == "" {
-		return nil, fmt.Errorf("topic_file is empty")
-	}
-
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		return nil, fmt.Errorf("read topic_file: %w", err)
-	}
-
-	var topics []string
-	for _, line := range splitLinesLocal(string(data)) {
-		t := strings.TrimSpace(line)
-		if t == "" || strings.HasPrefix(t, "#") {
-			continue
-		}
-		topics = append(topics, t)
-	}
-	if len(topics) == 0 {
-		return nil, fmt.Errorf("topic_file has no usable topics")
-	}
-
-	return topics, nil
-}
-
-func (s *Statistics) nextTopicRoundRobin(jobName string, topics []string) string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	idx := s.topicIndex[jobName]
-	topic := topics[idx%len(topics)]
-	s.topicIndex[jobName] = (idx + 1) % len(topics)
-	return topic
 }
 
 func (s *Statistics) popTopicFromRedisStream(ctx context.Context, job config.CronJobConfig) (string, func(context.Context) error, func(context.Context, error) (string, error), error) {
@@ -317,16 +307,15 @@ func (s *Statistics) popTopicFromRedisStream(ctx context.Context, job config.Cro
 	if topic == "" {
 		topic = strings.TrimSpace(fmt.Sprint(msg.Values["value"]))
 	}
-	if topic == "" {
-		for _, v := range msg.Values {
-			topic = strings.TrimSpace(fmt.Sprint(v))
-			if topic != "" {
-				break
-			}
+	if err := topicpkg.Validate(topic); err != nil {
+		if _, err := client.XDel(ctx, streamKey, msg.ID).Result(); err != nil {
+			return "", nil, nil, fmt.Errorf("remove invalid redis topic id=%s: %w", msg.ID, err)
 		}
-	}
-	if topic == "" {
-		return "", nil, nil, fmt.Errorf("redis stream message has empty topic")
+		if _, err := client.HDel(ctx, retryStateKey, msg.ID).Result(); err != nil {
+			return "", nil, nil, fmt.Errorf("clear retry state for invalid redis topic id=%s: %w", msg.ID, err)
+		}
+		log.Printf("[cron] deleted and skipped invalid redis topic stream=%s id=%s topic=%q error=%v", streamKey, msg.ID, topic, err)
+		return "", nil, nil, errNoTopicAvailable
 	}
 
 	ack := func(ackCtx context.Context) error {
@@ -398,21 +387,6 @@ func (s *Statistics) getRedisClient(key, addr, password string, db int) *redis.C
 	})
 	s.redisConns[key] = c
 	return c
-}
-
-func splitLinesLocal(s string) []string {
-	var lines []string
-	start := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\n' {
-			lines = append(lines, strings.TrimRight(s[start:i], "\r"))
-			start = i + 1
-		}
-	}
-	if start < len(s) {
-		lines = append(lines, s[start:])
-	}
-	return lines
 }
 
 func (s *Statistics) findAPIClient(serviceName, apiName string) *client.ApiClient {

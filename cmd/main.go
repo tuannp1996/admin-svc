@@ -19,6 +19,7 @@ import (
 	"admin-svc/internal/docker"
 	telegrampkg "admin-svc/internal/infrastructure/telegram"
 	"admin-svc/internal/service"
+	topicpkg "admin-svc/internal/topic"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -190,6 +191,10 @@ func startTelegramBotCommands(cfg *config.Config, notifier *telegrampkg.Notifier
 			return "Container restarted: " + containerName, nil
 		},
 		"/blog_gen": func(ctx context.Context, input string) (string, error) {
+			input = strings.TrimSpace(input)
+			if err := topicpkg.Validate(input); err != nil {
+				return "", err
+			}
 			var blogClient *client.ApiClient
 			for _, s := range *services {
 				for _, c := range s.ApiClients {
@@ -222,6 +227,9 @@ func startTelegramBotCommands(cfg *config.Config, notifier *telegrampkg.Notifier
 			published := 0
 			lastID := ""
 			for _, topic := range topics {
+				if err := topicpkg.Validate(topic); err != nil {
+					return "", fmt.Errorf("invalid topic %q: %w; wrap each multi-word topic in quotes", topic, err)
+				}
 				id, err := redisClient.XAdd(ctx, &redis.XAddArgs{
 					Stream: streamKey,
 					Values: map[string]interface{}{
@@ -412,6 +420,9 @@ func parseTopicsInput(input string) []string {
 	if input == "" {
 		return nil
 	}
+	if !strings.ContainsAny(input, "\"'") {
+		return []string{input}
+	}
 
 	tokens := tokenizeQuoted(input)
 	if len(tokens) == 0 {
@@ -543,7 +554,28 @@ func triggerApiClient(ctx context.Context, c *client.ApiClient, input string) (s
 	if err != nil {
 		return "", err
 	}
+	if c.Cfg.Name != nil && normalizeKeyMain(*c.Cfg.Name) == "bloggenarticle" {
+		article, parseErr := client.ParseGeneratedArticle(detail)
+		if parseErr == nil {
+			return formatGeneratedArticleCommandResult(article, status), nil
+		}
+	}
 	return *c.Cfg.Name + " triggered successfully\nHTTP status: " + strconv.Itoa(status) + "\nResponse:\n" + detail, nil
+}
+
+func formatGeneratedArticleCommandResult(article client.GeneratedArticle, status int) string {
+	summary := strings.TrimSpace(article.Summary)
+	if summary == "" {
+		summary = "(không có summary trong response)"
+	}
+	identifier := article.ID
+	if identifier == "" {
+		identifier = article.Slug
+	}
+	return fmt.Sprintf(
+		"Đã tạo bài viết thành công (HTTP %d)\nID: %s\nSlug: %s\nSummary: %s\n\n/blog_cover %s <minio_image_path>\n/blog_approve %s\n/blog_publish %s\n/blog_approve_publish %s",
+		status, article.ID, article.Slug, summary, identifier, identifier, identifier, identifier,
+	)
 }
 
 func executeShellCommand(ctx context.Context, command string, dockerChecker *docker.Checker) (string, error) {

@@ -11,21 +11,7 @@ scheduler:
   jobs:
     - name: "blog_gen"
       enabled: true
-      cron: "0 */4 * * * *"   # Every 4 hours at 00:00 (supports 5 or 6 fields)
-      service: "BLOG-AUTO"
-      api: "BLOG Gen Article"
-      topic_source: "txt"      # static | txt | redis
-      topic_file: "./topics/blog_topics.txt"
-      topic: ""                # used only when topic_source=static
-    - name: "tik_users"
-      enabled: true
-      cron: "0 0 20 * * *"   # Every day at 20:00
-      service: "TIKTOK-CONNECTOR"
-      api: "TIKTOK Get Users"
-      topic: ""
-    - name: "blog_gen_redis"
-      enabled: true
-      cron: "0 */3 * * * *"   # Every 3 hours
+      cron: "0 */4 * * * *"   # Every 4 hours at minute 0 (supports 5 or 6 fields)
       service: "BLOG-AUTO"
       api: "BLOG Gen Article"
       topic_source: "redis"
@@ -36,6 +22,12 @@ scheduler:
       redis_topic_wait_seconds: 20
       redis_topic_max_retries: 5
       redis_topic_dead_letter_stream: "blog:topics:stream:dlq"
+    - name: "tik_users"
+      enabled: true
+      cron: "0 0 20 * * *"   # Every day at 20:00
+      service: "TIKTOK-CONNECTOR"
+      api: "TIKTOK Get Users"
+      topic: ""
 
 docker:
   enabled: true

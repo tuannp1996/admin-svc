@@ -42,7 +42,6 @@ type CronJobConfig struct {
 	API                        string `yaml:"api"`
 	Topic                      string `yaml:"topic"`
 	TopicSource                string `yaml:"topic_source"`
-	TopicFile                  string `yaml:"topic_file"`
 	RedisAddr                  string `yaml:"redis_addr"`
 	RedisPassword              string `yaml:"redis_password"`
 	RedisDB                    int    `yaml:"redis_db"`
