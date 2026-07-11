@@ -52,10 +52,13 @@ blog_admin:
 
 scheduler:
   interval_seconds: 60
+  blog_report:
+    enabled: true
+    cron: "0 30 8 * * *" # Daily Telegram report at 08:30
   jobs:
     - name: "blog_gen"
       enabled: true
-      cron: "0 */4 * * * *"
+      cron: "0 0 */3 * * *" # Every 3 hours
       service: "BLOG-AUTO"
       api: "BLOG Gen Article"
       topic_source: "redis"

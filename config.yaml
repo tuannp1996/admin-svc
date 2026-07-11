@@ -8,10 +8,13 @@ blog_admin:
 
 scheduler:
   interval_seconds: 150  # How often to run all checks
+  blog_report:
+    enabled: true
+    cron: "0 30 8 * * *" # Daily at 08:30 Asia/Ho_Chi_Minh
   jobs:
     - name: "blog_gen"
       enabled: true
-      cron: "0 */4 * * * *"   # Every 4 hours at minute 0 (supports 5 or 6 fields)
+      cron: "0 0 */3 * * *"   # Every 3 hours at minute 0 (6 fields: second minute hour day month weekday)
       service: "BLOG-AUTO"
       api: "BLOG Gen Article"
       topic_source: "redis"

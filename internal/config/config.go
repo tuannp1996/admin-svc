@@ -30,8 +30,14 @@ type TelegramConfig struct {
 }
 
 type SchedulerConfig struct {
-	IntervalSeconds int             `yaml:"interval_seconds"`
-	Jobs            []CronJobConfig `yaml:"jobs"`
+	IntervalSeconds int              `yaml:"interval_seconds"`
+	Jobs            []CronJobConfig  `yaml:"jobs"`
+	BlogReport      BlogReportConfig `yaml:"blog_report"`
+}
+
+type BlogReportConfig struct {
+	Enabled bool   `yaml:"enabled"`
+	Cron    string `yaml:"cron"`
 }
 
 type CronJobConfig struct {

@@ -35,6 +35,8 @@ type BlogArticle struct {
 
 type blogArticleList struct {
 	Articles []BlogArticle `json:"articles"`
+	Total    int           `json:"total"`
+	Count    int           `json:"count"`
 }
 
 type SetCoverResult struct {
@@ -56,6 +58,11 @@ func NewBlogAdmin(baseURL string, timeoutSeconds int) *BlogAdminClient {
 }
 
 func (c *BlogAdminClient) List(ctx context.Context, status string, limit int) ([]BlogArticle, error) {
+	articles, _, err := c.ListWithTotal(ctx, status, limit)
+	return articles, err
+}
+
+func (c *BlogAdminClient) ListWithTotal(ctx context.Context, status string, limit int) ([]BlogArticle, int, error) {
 	query := url.Values{}
 	if status = strings.TrimSpace(status); status != "" && status != "all" {
 		query.Set("status", status)
@@ -63,9 +70,16 @@ func (c *BlogAdminClient) List(ctx context.Context, status string, limit int) ([
 	query.Set("limit", strconv.Itoa(limit))
 	var result blogArticleList
 	if err := c.do(ctx, http.MethodGet, "/articles?"+query.Encode(), nil, &result); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	return result.Articles, nil
+	total := result.Total
+	if total <= 0 {
+		total = result.Count
+	}
+	if total < len(result.Articles) {
+		total = len(result.Articles)
+	}
+	return result.Articles, total, nil
 }
 
 func (c *BlogAdminClient) Get(ctx context.Context, articleID int) (*BlogArticle, error) {

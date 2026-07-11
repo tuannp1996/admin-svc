@@ -18,6 +18,7 @@ import (
 	"admin-svc/internal/config"
 	"admin-svc/internal/docker"
 	telegrampkg "admin-svc/internal/infrastructure/telegram"
+	schedulerpkg "admin-svc/internal/scheduler"
 	"admin-svc/internal/service"
 	topicpkg "admin-svc/internal/topic"
 
@@ -63,6 +64,8 @@ func main() {
 
 	_, cancelCommands := startTelegramBotCommands(cfg, notifier, statistics, services, blogAdmin, dockerChecker)
 	defer cancelCommands()
+	stopBlogReport := schedulerpkg.NewBlogReport(cfg.Scheduler.BlogReport, notifier, blogAdmin).Start()
+	defer stopBlogReport()
 
 	checks := collectEnabledChecks(cfg)
 	if err := notifier.SendStartup(checks); err != nil {
