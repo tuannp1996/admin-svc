@@ -18,12 +18,14 @@ Alerts are **deduplicated**: you get one alert when something breaks, and one re
 The bot now supports runtime commands from the configured `chat_id`:
 
 - `/help`: lists all available commands and their usage.
+- `/blog`: displays the blog command menu.
+- `/tik`: displays the TikTok command menu.
 - `/status`: returns current monitor summary and number of active alerts.
 - `/restart <container_name>`: restarts a Docker container by name via Docker socket.
 - `/blog_gen <topic>` or `/gen_blog <topic>`: triggers external `auto_blog` service via HTTP. Topics must contain at least 4 words.
 - `/blog_topic "<topic1>" "<topic2>" ...`: publish one or multiple topics of at least 4 words into the configured Redis stream.
 - `/blog_articles [status] [limit]`: list recent articles; status defaults to `pending` and limit defaults to 10.
-- `/blog_view <article_id>`: show article status and metadata.
+- `/blog_view <article_id>`: show article status, metadata, `coverImage`, and preview URL when available.
 - `/blog_approve <article_id>`: approve a pending article.
 - `/blog_publish <article_id>`: publish an approved article.
 - `/blog_approve_publish <article_id>`: approve and publish in one action.

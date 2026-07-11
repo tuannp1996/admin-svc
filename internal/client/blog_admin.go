@@ -24,6 +24,10 @@ type BlogArticle struct {
 	Slug        string                 `json:"slug"`
 	Status      string                 `json:"status"`
 	Category    string                 `json:"category"`
+	CoverImage  string                 `json:"coverImage"`
+	PreviewURL  string                 `json:"previewUrl"`
+	ViewURL     string                 `json:"viewUrl"`
+	MarkdownURL string                 `json:"markdownUrl"`
 	FrontMatter map[string]interface{} `json:"front_matter"`
 	CreatedAt   string                 `json:"created_at"`
 	PublishedAt string                 `json:"published_at"`

@@ -171,6 +171,12 @@ func startTelegramBotCommands(cfg *config.Config, notifier *telegrampkg.Notifier
 		"/help": func(ctx context.Context, input string) (string, error) {
 			return telegramHelpText, nil
 		},
+		"/blog": func(ctx context.Context, input string) (string, error) {
+			return telegramBlogMenu, nil
+		},
+		"/tik": func(ctx context.Context, input string) (string, error) {
+			return telegramTikMenu, nil
+		},
 		"/status": func(ctx context.Context, input string) (string, error) {
 			return statistic.StatusSummary(), nil
 		},
@@ -342,17 +348,25 @@ const telegramHelpText = `Available commands:
 /help - show this help
 /status - show monitor status and active alerts
 /restart <container_name> - restart a Docker container
-/blog_gen <topic> - generate an article (minimum 4 words)
-/blog_topic <topic1> [topic2...] - publish topics to Redis; quote multi-word topics
-/blog_articles [status] [limit] - list recent articles
-/blog_view <article_id> - show article details
-/blog_approve <article_id> - approve an article
-/blog_publish <article_id> - publish an approved article
-/blog_approve_publish <article_id> - approve and publish an article
-/blog_hide <article_id> - hide a published article
-/blog_cover <id|slug> <minio_image_path> - set an article cover
-/tik_users - fetch TikTok users
+/blog - show blog commands
+/tik - show TikTok commands
 /exec <command> - run an allowlisted system command`
+
+const telegramBlogMenu = `┌─ BLOG COMMANDS
+│ /blog_gen <topic>
+│ /blog_topic <topic1> [topic2...]
+│ /blog_articles [status] [limit]
+│ /blog_view <article_id>
+│ /blog_approve <article_id>
+│ /blog_publish <article_id>
+│ /blog_approve_publish <article_id>
+│ /blog_hide <article_id>
+│ /blog_cover <id|slug> <minio_image_path>
+└─ Topics must contain at least 4 words.`
+
+const telegramTikMenu = `┌─ TIKTOK COMMANDS
+│ /tik_users
+└─ Fetch users from the configured TikTok API.`
 
 func parseBlogListInput(input string) (string, int, error) {
 	status := "pending"
@@ -428,10 +442,36 @@ func formatBlogArticle(article client.BlogArticle) string {
 	if description, ok := article.FrontMatter["description"].(string); ok && description != "" {
 		b.WriteString("\n\n" + description)
 	}
-	if cover, ok := article.FrontMatter["coverImage"].(string); ok && cover != "" {
-		b.WriteString("\n\nCover: " + cover)
+	coverImage := firstNonEmpty(article.CoverImage, stringFrontMatter(article.FrontMatter, "coverImage"))
+	if coverImage != "" {
+		b.WriteString("\n\ncoverImage: " + coverImage)
+	}
+	previewURL := firstNonEmpty(
+		article.PreviewURL,
+		article.ViewURL,
+		article.MarkdownURL,
+		stringFrontMatter(article.FrontMatter, "previewUrl"),
+		stringFrontMatter(article.FrontMatter, "viewUrl"),
+		stringFrontMatter(article.FrontMatter, "markdownUrl"),
+	)
+	if previewURL != "" {
+		b.WriteString("\nPreview: " + previewURL)
 	}
 	return b.String()
+}
+
+func stringFrontMatter(frontMatter map[string]interface{}, key string) string {
+	value, _ := frontMatter[key].(string)
+	return strings.TrimSpace(value)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func parseTopicsInput(input string) []string {
