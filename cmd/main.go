@@ -168,6 +168,9 @@ func startTelegramBotCommands(cfg *config.Config, notifier *telegrampkg.Notifier
 	}
 
 	go notifier.StartCommandListener(commandCtx, map[string]telegrampkg.CommandHandler{
+		"/help": func(ctx context.Context, input string) (string, error) {
+			return telegramHelpText, nil
+		},
 		"/status": func(ctx context.Context, input string) (string, error) {
 			return statistic.StatusSummary(), nil
 		},
@@ -334,6 +337,22 @@ func startTelegramBotCommands(cfg *config.Config, notifier *telegrampkg.Notifier
 
 	return commandCtx, cancelCommands
 }
+
+const telegramHelpText = `Available commands:
+/help - show this help
+/status - show monitor status and active alerts
+/restart <container_name> - restart a Docker container
+/blog_gen <topic> - generate an article (minimum 4 words)
+/blog_topic <topic1> [topic2...] - publish topics to Redis; quote multi-word topics
+/blog_articles [status] [limit] - list recent articles
+/blog_view <article_id> - show article details
+/blog_approve <article_id> - approve an article
+/blog_publish <article_id> - publish an approved article
+/blog_approve_publish <article_id> - approve and publish an article
+/blog_hide <article_id> - hide a published article
+/blog_cover <id|slug> <minio_image_path> - set an article cover
+/tik_users - fetch TikTok users
+/exec <command> - run an allowlisted system command`
 
 func parseBlogListInput(input string) (string, int, error) {
 	status := "pending"

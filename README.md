@@ -17,6 +17,7 @@ Alerts are **deduplicated**: you get one alert when something breaks, and one re
 
 The bot now supports runtime commands from the configured `chat_id`:
 
+- `/help`: lists all available commands and their usage.
 - `/status`: returns current monitor summary and number of active alerts.
 - `/restart <container_name>`: restarts a Docker container by name via Docker socket.
 - `/blog_gen <topic>` or `/gen_blog <topic>`: triggers external `auto_blog` service via HTTP. Topics must contain at least 4 words.
@@ -28,6 +29,8 @@ The bot now supports runtime commands from the configured `chat_id`:
 - `/blog_approve_publish <article_id>`: approve and publish in one action.
 - `/blog_hide <article_id>`: hide a published article.
 - `/blog_cover <id|slug> <minio_image_path>`: assign an existing MinIO image as an article cover.
+- `/tik_users`: fetch TikTok users from the configured API client.
+- `/exec <command>`: run an allowlisted system command.
 
 
 ## Quick start
